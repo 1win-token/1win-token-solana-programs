@@ -1,0 +1,18 @@
+[toolchain]
+anchor_version = "1.0.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+sale = "FtWxXcxvwd8w2QyLZqvjBnfF5yNegqzwNnNyF6PgkZub"
+burn = "HuzMDQVv3TA4wWFW1m4pBQ4q5Sz7aHoPwLLGHEzpP8Cb"
+vesting = "9AxqkB7qfMxQrbUwfhkyBTuG4DDEVa8t5utEeSM7b1hQ"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test --workspace"

@@ -1,0 +1,58 @@
+[package]
+name = "sale-test-common"
+version = "0.1.0"
+description = "Shared SVM test infrastructure for Sale: TestEnv (LiteSVM + the ProgramData fixture), actors, mints, clock helpers"
+edition = "2021"
+publish = false
+
+[dependencies]
+# The program under test: its program id (sale::id()) and the typed instruction
+# builders (sale::instruction::*, sale::accounts::*).
+sale = { path = "../../programs/sale", features = ["no-entrypoint"] }
+# The Burn program: only burn::id(), used to load burn.so and its ProgramData
+# fixture into TestEnv (env.rs). The Burn builders and readers live in the
+# tests/burn crate (burn-tests).
+burn = { path = "../../programs/burn", features = ["no-entrypoint"] }
+# The literal reference values (re-exported from lib.rs - the single source of
+# constants).
+expected = { path = "../expected" }
+# anchor_lang::error::ErrorCode - the Anchor dispatcher codes used in the test
+# assertions; AnchorDeserialize/Discriminator - decoding event payloads
+# (event_cpi) out of a transaction's inner instructions.
+anchor-lang = "1.0.2"
+
+# The SVM test stack - the versions from the
+# `anchor init --test-template litesvm` template (anchor-cli 1.0.2).
+litesvm = "0.10.0"
+solana-message = "3.0.1"
+solana-transaction = "3.0.2"
+solana-signer = "3.0.0"
+solana-keypair = "3.0.1"
+# Signature::default() - the stub used instead of a signature in the environment
+# without sigverify (a signer with no private key, env.rs).
+solana-signature = "3"
+
+# The remaining solana-* are the same 3.x minors anchor-lang 1.0.2 already
+# resolves (`cargo tree -d`: the duplicates live only inside litesvm's internal
+# agave stack, and every consumer-facing type is unified through the
+# pubkey→address re-export shims).
+solana-account = "3"
+solana-clock = "3"
+solana-instruction = "3"
+solana-instruction-error = "2"
+solana-program-pack = "3"
+solana-pubkey = "3"
+solana-sdk-ids = "3"
+solana-transaction-error = "3"
+# The system interface - the same version and feature litesvm 0.10 uses
+# (transfer/create_account).
+solana-system-interface = { version = "2.0", features = ["bincode"] }
+# The BPF Loader Upgradeable account layout (UpgradeableLoaderState) and its
+# bincode serialization - for the hand-built ProgramData fixture (Arch §9.1).
+solana-loader-v3-interface = { version = "6", features = ["bincode"] }
+bincode = "1"
+
+# Classic SPL Token / ATA (the interface crates, as in anchor-spl 1.0.2):
+# instruction builders and the Pack layouts for the token helpers. NOT Token-2022.
+spl-token-interface = "2"
+spl-associated-token-account-interface = "2"

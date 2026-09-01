@@ -1,0 +1,31 @@
+[package]
+name = "burn"
+version = "0.1.0"
+description = "1WIN Token Burn program"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "burn"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { version = "1.0.2", features = ["event-cpi"] }
+# Classic SPL Token (NOT token_interface / Token-2022 - forbidden by the spec).
+anchor-spl = "1.0.2"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

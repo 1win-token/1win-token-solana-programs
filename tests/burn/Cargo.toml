@@ -1,0 +1,32 @@
+[package]
+name = "burn-tests"
+version = "0.1.0"
+description = "SVM tests for the Burn program: instruction builders, PDA helpers, a TestEnv extension"
+edition = "2021"
+publish = false
+
+[dependencies]
+# The program under test: burn::id() plus typed instruction builders
+# (burn::instruction::*, burn::accounts::*) and the state types for the readers.
+burn = { path = "../../programs/burn", features = ["no-entrypoint"] }
+# The shared SVM test engine: TestEnv (LiteSVM + the ProgramData fixtures + actors
+# + mints), the clock and token helpers, custom_error_code, decode_event.
+sale-test-common = { path = "../sale" }
+# InstructionData / ToAccountMetas - assembling instructions from Anchor types.
+anchor-lang = "1.0.2"
+
+# The solana-* / spl-* versions are the same as in tests/sale (the litesvm template).
+solana-instruction = "3"
+solana-program-pack = "3"
+solana-pubkey = "3"
+solana-sdk-ids = "3"
+solana-signer = "3.0.0"
+# spl_token_interface::id() in the burn builder + the Mint Pack layout (the supply reader).
+spl-token-interface = "2"
+
+[dev-dependencies]
+# For the test binaries only: the transaction result types and the error assertions.
+litesvm = "0.10.0"
+solana-instruction-error = "2"
+solana-keypair = "3.0.1"
+solana-transaction-error = "3"

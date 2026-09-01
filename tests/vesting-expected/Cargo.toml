@@ -1,0 +1,11 @@
+[package]
+name = "vesting-expected"
+version = "0.1.0"
+description = "Hand-written literal reference values for the Vesting program's tests (§10.5, the edges of §10.6)"
+edition = "2021"
+
+# ZERO dependencies - by construction (as in tests/expected): the crate physically
+# cannot import the program's formula, so a reference value is always an
+# independent literal
+# (tests-bind-to-real-code).
+[dependencies]

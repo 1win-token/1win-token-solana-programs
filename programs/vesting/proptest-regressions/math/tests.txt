@@ -1,0 +1,14 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bfcef8f1316db7c7b1cc14e79f187b4b6a13cf1dad55171ac1e428175a412369 # shrinks to sch = Schedule { reference_amount: 10000000, tge_bps: 0, monthly_bps: 264, cliff_months: 1 }
+cc e6665a4437920af9532a2934131bed7d683499ef44438accf70792e686b0bc9a # shrinks to sch = Schedule { reference_amount: 9, tge_bps: 6667, monthly_bps: 2223, cliff_months: 0 }, now = 1805184000
+cc d57440aed976d22aebd521f5dc99014526ce9f3098631953c8c1794f5171b751 # shrinks to sch = Schedule { reference_amount: 12521547701404800175, tge_bps: 9121, monthly_bps: 5611, cliff_months: 0 }
+cc 1a1c848406cdeba6ff907ae4ba24da71d021a1407b7d53babbea93b1203d0e93 # shrinks to sch = Schedule { reference_amount: 12044886760502482283, tge_bps: 7312, monthly_bps: 8003, cliff_months: 0 }, a = 0, b = 1802592000
+cc 96a969d7fa9e6c3cd723d2f4020bb6af4daefc002c51f3ac42a1e8045ceecd33 # shrinks to reference_amount = 1, tge_bps = 0, monthly_bps = 20000, cliff_months = 0, now = 9223372036854775807, tge_ts = 0
+cc d06421461fda49cd383a01dc0dfeda227cb391194c056aa1167e602b4dd52baa # shrinks to sch = Schedule { reference_amount: 37, tge_bps: 0, monthly_bps: 2163, cliff_months: 0 }
+cc c94a034226e216f47ea9dbfff872d00c1d491c48cb59f94e1e41c79a5b423f30 # shrinks to sch = Schedule { reference_amount: 10000000, tge_bps: 0, monthly_bps: 182, cliff_months: 0 }
+cc 8800965cb308107b4b5c757eccb6e4bc8180786f89b63ebdc7f8d28a6a4f2216 # shrinks to reference_amount = 1, tge_bps = 0, monthly_bps = 20000, cliff_months = 0, now = 9223372036854775807, tge_ts = 9223372036854775807

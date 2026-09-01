@@ -1,0 +1,38 @@
+[package]
+name = "vesting"
+version = "0.1.0"
+description = "1WIN Vesting program"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "vesting"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+# init-if-needed: only for the recipient's ATA in claim - the recipient may have
+# closed the account; the ATA address is deterministic and no state is
+# re-initialized (Arch §9.8).
+anchor-lang = { version = "1.0.2", features = ["event-cpi", "init-if-needed"] }
+# Classic SPL Token (NOT token_interface / Token-2022 - forbidden by the spec):
+# activity vaults, transfers and closes signed by vault_authority.
+anchor-spl = "1.0.2"
+
+[dev-dependencies]
+proptest = "1"
+# The Vesting reference values live in their own crate: the auditable boundary
+# between Sale and Vesting stays separate.
+vesting-expected = { path = "../../tests/vesting-expected" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

@@ -1,0 +1,50 @@
+[package]
+name = "sale-e2e"
+version = "0.1.0"
+description = "e2e tests for Sale against surfpool (a real validator simulator): the full lifecycle plus a load measurement of purchase"
+edition = "2021"
+publish = false
+
+[dependencies]
+# The program under test (the event and state types, the error codes) and the
+# instruction builders from the shared test crate - the same interface the
+# LiteSVM tests use.
+sale = { path = "../../programs/sale", features = ["no-entrypoint"] }
+sale-test-common = { path = "../sale" }
+expected = { path = "../expected" }
+anchor-lang = "1.0.2"
+
+# The RPC client to surfpool (blocking for the scenarios, nonblocking for the load
+# test).
+solana-rpc-client = "3"
+solana-rpc-client-api = "3"
+solana-transaction-status-client-types = "3"
+solana-commitment-config = "3"
+
+# The same solana-* 3.x that anchor-lang 1.0.2 / tests/sale resolve.
+solana-account = "3"
+solana-clock = "3"
+solana-compute-budget-interface = "3"
+solana-hash = "3"
+solana-instruction = "3"
+solana-instruction-error = "2"
+solana-keypair = "3.0.1"
+solana-message = "3.0.1"
+solana-program-pack = "3"
+solana-pubkey = "3"
+solana-sdk-ids = "3"
+solana-signature = "3"
+solana-signer = "3.0.0"
+solana-system-interface = { version = "2.0", features = ["bincode"] }
+solana-transaction = { version = "3.0.2", features = ["bincode"] }
+solana-transaction-error = "3"
+
+spl-token-interface = "2"
+spl-associated-token-account-interface = "2"
+
+# Transaction serialization (size), decoding inner instructions (base58), the
+# cheat codes (JSON).
+bincode = "1"
+bs58 = "0.5"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }

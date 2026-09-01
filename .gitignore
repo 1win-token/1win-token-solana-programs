@@ -1,0 +1,13 @@
+# Rust / Cargo
+/target
+**/*.rs.bk
+
+# Anchor
+.anchor/
+test-ledger/
+**/*.so
+
+# Keys
+*keypair*.json
+id.json
+*.pem

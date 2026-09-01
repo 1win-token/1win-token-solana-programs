@@ -1,0 +1,10 @@
+[package]
+name = "expected"
+version = "0.1.0"
+description = "Hand-written literal reference values for the Sale program's tests (E1-E3, the edges of §10.6)"
+edition = "2021"
+
+# ZERO dependencies - by construction: the crate physically cannot import the
+# program's formula, so a reference value is always an independent literal
+# (tests-bind-to-real-code).
+[dependencies]
