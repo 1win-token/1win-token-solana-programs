@@ -53,7 +53,9 @@ pub struct OwnerProposed {
 }
 
 #[event]
-pub struct OwnerProposalCancelled {}
+pub struct OwnerProposalCancelled {
+    pub pending_owner: Pubkey,
+}
 
 #[event]
 pub struct RoleUpdated {

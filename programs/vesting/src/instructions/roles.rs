@@ -68,11 +68,11 @@ pub fn propose_owner(ctx: Context<OwnerUpdate>, new_owner: Pubkey) -> Result<()>
 pub fn cancel_owner_proposal(ctx: Context<OwnerUpdate>) -> Result<()> {
     let config = &mut ctx.accounts.config;
 
-    require!(config.pending_owner.is_some(), VestingError::NoPendingOwner);
+    let pending_owner = config.pending_owner.ok_or(VestingError::NoPendingOwner)?;
 
     config.pending_owner = None;
 
-    emit_cpi!(OwnerProposalCancelled {});
+    emit_cpi!(OwnerProposalCancelled { pending_owner });
     Ok(())
 }
 

@@ -24,10 +24,11 @@ pub struct OwnerProposed {
     pub pending_owner: Pubkey,
 }
 
-/// `cancel_owner_proposal`: the nomination is withdrawn. No fields - the event
-/// itself expresses the whole change.
+/// `cancel_owner_proposal`: the nomination of `pending_owner` is withdrawn.
 #[event]
-pub struct OwnerProposalCancelled {}
+pub struct OwnerProposalCancelled {
+    pub pending_owner: Pubkey,
+}
 
 #[event]
 pub struct RoleUpdated {

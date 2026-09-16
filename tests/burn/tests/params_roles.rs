@@ -550,8 +550,13 @@ fn cancel_owner_proposal_clears_pending_and_blocks_candidate() {
         &owner,
     );
     r.as_ref().expect("owner: cancel_owner_proposal passes");
-    let _ev: OwnerProposalCancelled =
+    let ev: OwnerProposalCancelled =
         decode_event(&r).expect("the OwnerProposalCancelled event is emitted");
+    assert_eq!(
+        ev.pending_owner,
+        candidate.pubkey(),
+        "the event names the withdrawn candidate"
+    );
     let s = env.burn_state();
     assert_eq!(s.pending_owner, None, "pending_owner was cleared");
     assert_eq!(s.owner, owner.pubkey(), "the owner did not change");

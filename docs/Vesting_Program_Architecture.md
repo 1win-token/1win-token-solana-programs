@@ -337,7 +337,7 @@ The handover of ownership takes two steps, and the second is executed by the new
 - **The context:** the same as `propose_owner`'s.
 - **The effects:** `config.pending_owner = None`.
 - **The errors:** `NotOwner`, `NoPendingOwner`.
-- **The event:** `OwnerProposalCancelled{}`.
+- **The event:** `OwnerProposalCancelled{pending_owner}`.
 
 **`accept_owner()`**
 
@@ -548,7 +548,7 @@ Checking `M` (when `monthly_bps > 0`): Ecosystem `ceil(9000/500)=18`; Community 
 | `AdminUpdated` | set_admin | admin |
 | `OperatorUpdated` | set_operator | operator |
 | `OwnerProposed` | propose_owner | pending_owner |
-| `OwnerProposalCancelled` | cancel_owner_proposal | - |
+| `OwnerProposalCancelled` | cancel_owner_proposal | pending_owner |
 | `OwnerUpdated` | accept_owner | new_owner |
 | `WithdrawalAuthorityUpdated` | set_withdrawal_authority | withdrawal_authority |
 | `VestingCreated` | create_vesting | activity_id, recipient, reference_amount, tge_bps, monthly_bps, cliff_months, label |

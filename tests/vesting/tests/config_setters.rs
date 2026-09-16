@@ -971,8 +971,13 @@ fn cancel_owner_proposal_drops_the_candidate() {
         None,
         "the candidate was withdrawn"
     );
-    decode_event::<OwnerProposalCancelled>(&r)
-        .expect("cancel_owner_proposal emits OwnerProposalCancelled");
+    let ev: OwnerProposalCancelled =
+        decode_event(&r).expect("cancel_owner_proposal emits OwnerProposalCancelled");
+    assert_eq!(
+        ev.pending_owner,
+        candidate.pubkey(),
+        "the event names the withdrawn candidate"
+    );
 
     // A withdrawn nomination cannot be executed.
     env.expire_blockhash();

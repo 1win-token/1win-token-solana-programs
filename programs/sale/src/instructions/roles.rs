@@ -48,11 +48,11 @@ pub fn propose_owner(ctx: Context<OwnerUpdate>, new_authority: Pubkey) -> Result
 pub fn cancel_owner_proposal(ctx: Context<OwnerUpdate>) -> Result<()> {
     let state = &mut ctx.accounts.sale_state;
 
-    require!(state.pending_owner.is_some(), SaleError::NoPendingOwner);
+    let pending_owner = state.pending_owner.ok_or(SaleError::NoPendingOwner)?;
 
     state.pending_owner = None;
 
-    emit_cpi!(OwnerProposalCancelled {});
+    emit_cpi!(OwnerProposalCancelled { pending_owner });
     Ok(())
 }
 

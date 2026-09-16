@@ -1163,8 +1163,8 @@ goes back to `rent_collector`.
 The events (an audit trail for the indexer):
 `Initialized{owner, admin, operator, token_mint, withdrawal_authority, tge_ts}`,
 `TgeUpdated{tge_ts}`, `AdminUpdated{admin}`, `OperatorUpdated{operator}`,
-`OwnerProposed{pending_owner}`, `OwnerProposalCancelled{}`, `OwnerUpdated{new_owner}`,
-`WithdrawalAuthorityUpdated{withdrawal_authority}`,
+`OwnerProposed{pending_owner}`, `OwnerProposalCancelled{pending_owner}`,
+`OwnerUpdated{new_owner}`, `WithdrawalAuthorityUpdated{withdrawal_authority}`,
 `VestingCreated{activity_id, recipient, reference_amount, tge_bps, monthly_bps, cliff_months, label}`,
 `RecipientUpdated{activity_id, new_recipient}`,
 `VestingCancelled{activity_id, amount, beneficiary_token, rent_collector}`,
