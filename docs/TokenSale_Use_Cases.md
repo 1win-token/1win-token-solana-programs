@@ -421,8 +421,11 @@ The Claim schedule (`claim_start`, the duration) is the one parameter that stays
 editable after the sale starts - until the pool is fixed (`set_claim_schedule`,
 `!pool_fixed`). The start must lie ahead of both the sale's end and the edit itself,
 and no more than 30 days after the later of the two (`ClaimStartInPast` /
-`ClaimStartTooFar`); the duration is at most 12 months. Because the ceiling follows
-the edit rather than the sale's end, a late activation is always recoverable: Admin
+`ClaimStartTooFar`); the duration is no shorter than an hour and no longer than
+12 months (`ClaimDurationTooShort` / `ClaimDurationTooLong`): a window that would
+close before participants can use it never reaches the state, because after the
+fix nobody could widen it. Because the ceiling follows the edit rather than the
+sale's end, a late activation is always recoverable: Admin
 moves the start forward and activates (§4).
 
 ### 8.3. Changing the roles
@@ -470,6 +473,7 @@ moves the start forward and activates (§4).
 | A repeated claim | A revert - the aggregate is closed (`AccountNotInitialized`) |
 | Changing the schedule or the transaction limits after the sale starts | A `SaleAlreadyStarted` revert - frozen from the start |
 | A typo in the sale schedule: a start beyond 90 days or an intake window longer than 30 days | A `StartDateTooFar` / `SaleDurationTooLong` revert - both on `initialize` and on `set_sale_schedule` |
+| A Claim window of seconds or minutes, or longer than 12 months | A `ClaimDurationTooShort` / `ClaimDurationTooLong` revert - both on `initialize` and on `set_claim_schedule`; a window nobody can use must never reach the state, because after the pool is fixed nobody can widen it |
 | Never claimed before the deadline | The tokens and the refund are swept to the project treasury; the aggregate's rent comes back on the batch closing |
 | A risky wallet identified after the claim | The program is powerless; the break-glass measure is freezing the token account through the Freeze Authority (outside the program, held by the ops multisig / Admin) |
 | A full refund of a wallet's contributions, then a new purchase | The new deposit gets a new index (the counter never decreases) - address reuse is impossible |

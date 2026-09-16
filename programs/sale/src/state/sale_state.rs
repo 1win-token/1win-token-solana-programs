@@ -6,6 +6,7 @@ use crate::errors::SaleError;
 use crate::math::TOKEN_UNITS;
 use crate::phase::{current_phase, Phase, PhaseSchedule};
 
+pub const MIN_CLAIM_DURATION: i64 = 60 * 60;
 pub const MAX_CLAIM_DURATION: i64 = 365 * 24 * 60 * 60;
 pub const MAX_CLAIM_START_DELAY: i64 = 30 * 24 * 60 * 60;
 pub const MAX_SALE_START_DELAY: i64 = 90 * 24 * 60 * 60;
@@ -144,10 +145,13 @@ impl SaleState {
     }
 
     pub fn validate_claim_duration(claim_duration: i64) -> Result<()> {
-        require!(claim_duration > 0, SaleError::InvalidParams);
+        require!(
+            claim_duration >= MIN_CLAIM_DURATION,
+            SaleError::ClaimDurationTooShort
+        );
         require!(
             claim_duration <= MAX_CLAIM_DURATION,
-            SaleError::InvalidParams
+            SaleError::ClaimDurationTooLong
         );
         Ok(())
     }

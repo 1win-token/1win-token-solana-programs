@@ -11,6 +11,7 @@ use anchor_lang::error::ERROR_CODE_OFFSET;
 use sale::errors::SaleError;
 use sale::state::{
     MAX_CLAIM_DURATION, MAX_CLAIM_START_DELAY, MAX_SALE_DURATION, MAX_SALE_START_DELAY,
+    MIN_CLAIM_DURATION,
 };
 use sale_test_common::{
     custom_error_code, deposit_vault_pda, initialize_ix, token_vault_pda, vault_authority_pda,
@@ -322,18 +323,36 @@ fn initialize_accepts_sale_duration_at_ceiling() {
 // ===================================================================
 
 #[test]
-fn initialize_rejects_zero_claim_duration() {
+fn initialize_rejects_claim_duration_below_min() {
     let mut env = TestEnv::new();
     let owner = env.actors.owner.insecure_clone();
     let (usdc, win) = (env.usdc_mint, env.win_mint);
     let mut p = env.valid_init_params();
-    p.claim_duration = 0;
+    p.claim_duration = MIN_CLAIM_DURATION - 1; // one second below the floor
 
     let r = send_initialize(&mut env, &owner, usdc, win, &p);
     assert_eq!(
         custom_error_code(&r),
-        Some(err(SaleError::InvalidParams)),
-        "claim_duration == 0 → InvalidParams, the result: {r:?}"
+        Some(err(SaleError::ClaimDurationTooShort)),
+        "claim_duration < MIN → ClaimDurationTooShort, the result: {r:?}"
+    );
+    assert!(!env.sale_state_exists(), "the state was not created");
+}
+
+#[test]
+fn initialize_accepts_claim_duration_at_min() {
+    let mut env = TestEnv::new();
+    let owner = env.actors.owner.insecure_clone();
+    let (usdc, win) = (env.usdc_mint, env.win_mint);
+    let mut p = env.valid_init_params();
+    p.claim_duration = MIN_CLAIM_DURATION; // exactly the floor
+
+    send_initialize(&mut env, &owner, usdc, win, &p)
+        .expect("a duration exactly at the floor passes");
+    assert_eq!(
+        env.sale_state().claim_duration,
+        MIN_CLAIM_DURATION,
+        "the window was written at its shortest permitted length"
     );
 }
 
@@ -348,8 +367,8 @@ fn initialize_rejects_claim_duration_above_max() {
     let r = send_initialize(&mut env, &owner, usdc, win, &p);
     assert_eq!(
         custom_error_code(&r),
-        Some(err(SaleError::InvalidParams)),
-        "claim_duration > MAX → InvalidParams, the result: {r:?}"
+        Some(err(SaleError::ClaimDurationTooLong)),
+        "claim_duration > MAX → ClaimDurationTooLong, the result: {r:?}"
     );
 }
 

@@ -130,7 +130,7 @@
 | Sale start date | - | Admin | Before the start; no further out than 90 days from the edit |
 | Sale duration | ~2 weeks | Admin | Only before the start; afterwards the schedule is immutable; at most 30 days |
 | Claim start date | - | Admin | At initialization; editable until the pool is fixed; later than the sale's end and than the moment of the edit, and no more than +30 days from the later of the two |
-| Claim duration | 12 months | Admin | At initialization; editable until the pool is fixed; at most 12 months |
+| Claim duration | 12 months | Admin | At initialization; editable until the pool is fixed; at least 1 hour and at most 12 months |
 
   The values above are the reference configuration this document works with; each of
   them is an initialization parameter rather than a constant of the program.

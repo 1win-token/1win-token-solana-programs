@@ -71,4 +71,8 @@ pub enum SaleError {
     NoPendingOwner,
     #[msg("Buyer address is off-curve; only a wallet with its own private key can take part in the sale")]
     WalletNotOnCurve,
+    #[msg("claim_duration is below MIN_CLAIM_DURATION")]
+    ClaimDurationTooShort,
+    #[msg("claim_duration exceeds MAX_CLAIM_DURATION")]
+    ClaimDurationTooLong,
 }

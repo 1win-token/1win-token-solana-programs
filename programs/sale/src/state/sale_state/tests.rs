@@ -297,17 +297,25 @@ fn claim_start_date_extremes_are_errors() {
 
 // ----- Claim window length -----
 
-/// Both ends: 0/1 at the bottom, MAX_CLAIM_DURATION/+1 at the top.
+/// Both ends: MIN_CLAIM_DURATION−1/MIN_CLAIM_DURATION at the bottom (zero, one
+/// second and every negative value fall below the floor), MAX_CLAIM_DURATION/+1
+/// at the top. Each side has its own code.
 #[test]
 fn claim_duration_boundaries() {
-    let cases: [(i64, Option<u32>); 7] = [
-        (i64::MIN, err(SaleError::InvalidParams)),
-        (-1, err(SaleError::InvalidParams)),
-        (0, err(SaleError::InvalidParams)),
-        (1, None),
+    let cases: [(i64, Option<u32>); 10] = [
+        (i64::MIN, err(SaleError::ClaimDurationTooShort)),
+        (-1, err(SaleError::ClaimDurationTooShort)),
+        (0, err(SaleError::ClaimDurationTooShort)),
+        (1, err(SaleError::ClaimDurationTooShort)),
+        (
+            MIN_CLAIM_DURATION - 1,
+            err(SaleError::ClaimDurationTooShort),
+        ),
+        (MIN_CLAIM_DURATION, None),
+        (MIN_CLAIM_DURATION + 1, None),
         (MAX_CLAIM_DURATION - 1, None),
         (MAX_CLAIM_DURATION, None),
-        (MAX_CLAIM_DURATION + 1, err(SaleError::InvalidParams)),
+        (MAX_CLAIM_DURATION + 1, err(SaleError::ClaimDurationTooLong)),
     ];
     for (duration, want) in cases {
         assert_eq!(

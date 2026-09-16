@@ -213,7 +213,7 @@ deadline (5.9).
 | Sale start date (`start_date`) | - | Admin (before the start); `now < start_date ≤ now + 90 days` (`MAX_SALE_START_DELAY`) - protection against a mistakenly distant start |
 | Sale end date (`end_date`) | - | Admin (only before the Sale phase starts; afterwards the sale's schedule is immutable); `end_date − start_date ≤ 30 days` (`MAX_SALE_DURATION`) - protection against a mistakenly long intake window |
 | Claim start date (`claim_start`) | - | Admin (until the pool is fixed, `!pool_fixed`); `max(end_date, now) < claim_start ≤ max(end_date, now) + 30 days` (`MAX_CLAIM_START_DELAY`), `now` being the moment of the edit - protection against a start already in the past and against a mistakenly distant schedule; at the moment the pool is fixed `claim_start` must still lie ahead (`now < claim_start`, §5.6) |
-| Claim duration | 12 months | Admin (until the pool is fixed, `!pool_fixed`; at most 12 months, `MAX_CLAIM_DURATION`) |
+| Claim duration | 12 months | Admin (until the pool is fixed, `!pool_fixed`); `1 hour ≤ duration ≤ 12 months` (`MIN_CLAIM_DURATION`, `MAX_CLAIM_DURATION`) - protection against a window that closes before participants can use it and against a mistakenly open-ended one |
 
 **The soft cap is a derived quantity.** Two parameters are stored - the price and
 the emission; the oversubscription threshold is always computed as
@@ -238,7 +238,12 @@ that edit: a shift of `end_date` that violates it reverts, and so does a start t
 has already passed. Before the sale ends the anchor is `end_date`; after it, the
 moment of the edit - so a valid future start can be scheduled at any time while the
 pool is not fixed. On top of that, fixing the pool requires `claim_start` to still
-lie ahead at the moment of the fixation itself (`now < claim_start`, §5.6).
+lie ahead at the moment of the fixation itself (`now < claim_start`, §5.6). The
+duration is bounded on both sides on every write (`initialize` and
+`set_claim_schedule`): no shorter than an hour (`MIN_CLAIM_DURATION`) and no longer
+than 12 months (`MAX_CLAIM_DURATION`). A window of seconds or minutes is a value the
+program must never accept: once the pool is fixed nobody can widen it, and the
+participants would be left with a Claim they cannot reach.
 
 **The price and the emission are immutable from the start of the Sale phase.** They
 are editable only before the Sale phase starts; from its beginning both parameters

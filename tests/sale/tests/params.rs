@@ -11,6 +11,7 @@ use anchor_lang::error::ERROR_CODE_OFFSET;
 use sale::errors::SaleError;
 use sale::state::{
     MAX_CLAIM_DURATION, MAX_CLAIM_START_DELAY, MAX_SALE_DURATION, MAX_SALE_START_DELAY,
+    MIN_CLAIM_DURATION,
 };
 use sale_test_common::{
     custom_error_code, set_claim_schedule_ix, set_emission_ix, set_price_ix, set_sale_schedule_ix,
@@ -431,20 +432,20 @@ fn set_claim_schedule_positive_and_negatives() {
         "claim_start_date > end+30d → ClaimStartTooFar: {r:?}"
     );
 
-    // NEGATIVE: claim_duration == 0 → InvalidParams.
+    // NEGATIVE: claim_duration < MIN_CLAIM_DURATION → ClaimDurationTooShort.
     env.expire_blockhash();
     let r = send(
         &mut env,
-        set_claim_schedule_ix(admin.pubkey(), valid_start, 0),
+        set_claim_schedule_ix(admin.pubkey(), valid_start, MIN_CLAIM_DURATION - 1),
         &admin,
     );
     assert_eq!(
         custom_error_code(&r),
-        Some(err(SaleError::InvalidParams)),
-        "claim_duration 0 → InvalidParams: {r:?}"
+        Some(err(SaleError::ClaimDurationTooShort)),
+        "claim_duration < MIN → ClaimDurationTooShort: {r:?}"
     );
 
-    // NEGATIVE: claim_duration > MAX_CLAIM_DURATION → InvalidParams.
+    // NEGATIVE: claim_duration > MAX_CLAIM_DURATION → ClaimDurationTooLong.
     env.expire_blockhash();
     let r = send(
         &mut env,
@@ -453,8 +454,8 @@ fn set_claim_schedule_positive_and_negatives() {
     );
     assert_eq!(
         custom_error_code(&r),
-        Some(err(SaleError::InvalidParams)),
-        "claim_duration > MAX → InvalidParams: {r:?}"
+        Some(err(SaleError::ClaimDurationTooLong)),
+        "claim_duration > MAX → ClaimDurationTooLong: {r:?}"
     );
 
     // The fields were not corrupted by the negatives.
@@ -465,6 +466,43 @@ fn set_claim_schedule_positive_and_negatives() {
     );
     assert_eq!(
         s.claim_duration, valid_dur,
+        "claim_duration is the one left by the positive case"
+    );
+}
+
+#[test]
+fn set_claim_schedule_accepts_duration_at_min() {
+    let (mut env, p, admin) = setup();
+
+    // POSITIVE: exactly the floor passes (the default is 90 days - in PreSale the
+    // window may still be cut down to the shortest permitted length).
+    send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), p.claim_start_date, MIN_CLAIM_DURATION),
+        &admin,
+    )
+    .expect("a duration exactly at the floor passes");
+    assert_eq!(
+        env.sale_state().claim_duration,
+        MIN_CLAIM_DURATION,
+        "the window was written at its shortest permitted length"
+    );
+
+    // NEGATIVE: one second below it.
+    env.expire_blockhash();
+    let r = send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), p.claim_start_date, MIN_CLAIM_DURATION - 1),
+        &admin,
+    );
+    assert_eq!(
+        custom_error_code(&r),
+        Some(err(SaleError::ClaimDurationTooShort)),
+        "one second below the floor → ClaimDurationTooShort: {r:?}"
+    );
+    assert_eq!(
+        env.sale_state().claim_duration,
+        MIN_CLAIM_DURATION,
         "claim_duration is the one left by the positive case"
     );
 }
