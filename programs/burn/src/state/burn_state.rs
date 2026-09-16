@@ -18,8 +18,8 @@ pub struct BurnState {
     pub pending_owner: Option<Pubkey>,
     /// Admin (ops multisig) - program parameters (`set_limits`).
     pub admin: Pubkey,
-    /// Operator (automation hot key) - executes the burn (`burn`) and is the
-    /// SPL authority of the source token account.
+    /// Operator (automation hot key) - executes the burn (`burn`). A role only:
+    /// the key holds no token-level right over the vault.
     pub operator: Pubkey,
     pub token_mint: Pubkey,
     pub daily_limit: u64,

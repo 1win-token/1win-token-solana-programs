@@ -1,17 +1,21 @@
 //! The `burn` instruction - the positive case (the accumulator windows, supply, the
 //! event) plus the negative matrix: period limits, a zero amount, substituting the
-//! accumulator, SPL errors, overflow, and the lazy reset of the windows across day
-//! and week rollovers.
+//! accumulator, the vault or its authority, the token layer around the program,
+//! SPL errors, overflow, and the lazy reset of the windows across day and week
+//! rollovers.
 //!
 //! tests-bind-to-real-code: the real instruction → an assertion of the on-chain
-//! effect (the `BurnCounters.day/week` windows, `Mint.supply`, the source balance,
+//! effect (the `BurnCounters.day/week` windows, `Mint.supply`, the vault balance,
 //! the `BurnExecuted` payload) or of a specific error code. Every expectation is a
 //! hand-written literal, never a recomputation of the program's formulas.
 
 use anchor_lang::error::{ErrorCode, ERROR_CODE_OFFSET};
 use burn::errors::BurnError;
 use burn::events::BurnExecuted;
-use burn_tests::{burn_counters_pda, burn_ix, burn_ix_with_counters, burn_state_pda, BurnTestEnv};
+use burn_tests::{
+    burn_counters_pda, burn_ix, burn_ix_with_counters, burn_ix_with_vault_authority,
+    burn_state_pda, spl_burn_ix, spl_transfer_ix, vault_authority_pda, vault_pda, BurnTestEnv,
+};
 use sale_test_common::{custom_error_code, decode_event, TestEnv};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -57,8 +61,18 @@ fn send(
     env.send_ixs(&[ix], &signer.pubkey(), &[signer])
 }
 
-/// The source account: the ATA of `wallet` for the $1WIN mint holding `amount` units.
-fn kettle_with(env: &mut TestEnv, wallet: &Pubkey, amount: u64) -> Pubkey {
+/// Mints `amount` units straight into the vault (created by initialize) and returns
+/// its address. Anyone can pay into the vault; only the program can burn out of it.
+fn fund_vault(env: &mut TestEnv, amount: u64) -> Pubkey {
+    let mint = env.win_mint;
+    let vault = vault_pda();
+    env.mint_to(&mint, &vault, amount);
+    vault
+}
+
+/// A $1WIN token account OUTSIDE the program: the ATA of `wallet` holding `amount`
+/// units - a decoy for the vault-substitution negatives.
+fn ata_with(env: &mut TestEnv, wallet: &Pubkey, amount: u64) -> Pubkey {
     let mint = env.win_mint;
     let ata = env.create_ata(wallet, &mint);
     env.mint_to(&mint, &ata, amount);
@@ -66,13 +80,13 @@ fn kettle_with(env: &mut TestEnv, wallet: &Pubkey, amount: u64) -> Pubkey {
 }
 
 /// The standard fixture: warp to BASE_TS, init burn with the default limits (daily
-/// 50e9, weekly 200e9), and the operator's source account holding 100e9 units.
+/// 50e9, weekly 200e9), and the vault holding 100e9 units.
 fn setup_default(env: &mut TestEnv) -> (Keypair, Pubkey) {
     env.warp_to(BASE_TS);
     env.init_default_burn();
     let operator = env.actors.operator.insecure_clone();
-    let kettle = kettle_with(env, &operator.pubkey(), 100_000_000_000);
-    (operator, kettle)
+    let vault = fund_vault(env, 100_000_000_000);
+    (operator, vault)
 }
 
 /// Asserts both accumulator windows: `day` / `week` = (index, burned) - the literals
@@ -86,7 +100,7 @@ fn assert_windows(env: &TestEnv, day: (u64, u64), week: (u64, u64), ctx: &str) {
 }
 
 // ===================================================================
-// POSITIVE: the accumulator windows, supply, the source balance, the event; a second
+// POSITIVE: the accumulator windows, supply, the vault balance, the event; a second
 // burn tops up both windows.
 // ===================================================================
 
@@ -119,11 +133,11 @@ fn burn_updates_windows_supply_and_emits_event() {
         88_000_000_000,
         "supply after the burn"
     );
-    // The source balance dropped by the same amount.
+    // The vault balance dropped by the same amount.
     assert_eq!(
         env.token_balance(&kettle),
         88_000_000_000,
-        "the source account after the burn"
+        "the vault after the burn"
     );
     // The event: the reference values are literals; the indices come from Clock.
     let ev: BurnExecuted = decode_event(&r).expect("the BurnExecuted event is emitted");
@@ -220,7 +234,7 @@ fn burn_weekly_limit_binds_when_daily_ok() {
     env.warp_to(BASE_TS);
     env.init_burn_with_limits(10_000_000_000, 5_000_000_000);
     let operator = env.actors.operator.insecure_clone();
-    let kettle = kettle_with(&mut env, &operator.pubkey(), 100_000_000_000);
+    let kettle = fund_vault(&mut env, 100_000_000_000);
     let win = env.win_mint;
 
     // 60 tokens: the daily side is fine (6e9 ≤ 10e9), the weekly one would be exceeded
@@ -305,7 +319,7 @@ fn burn_windows_overflow_is_error_not_panic() {
     env.warp_to(BASE_TS);
     env.init_burn_with_limits(u64::MAX, u64::MAX);
     let operator = env.actors.operator.insecure_clone();
-    let kettle = kettle_with(&mut env, &operator.pubkey(), 1_000_000_000);
+    let kettle = fund_vault(&mut env, 1_000_000_000);
     let win = env.win_mint;
 
     // The windows become non-zero (6 tokens).
@@ -328,7 +342,7 @@ fn burn_windows_overflow_is_error_not_panic() {
         Some(err(BurnError::MathOverflow)),
         "a window overflow → MathOverflow: {r:?}"
     );
-    // The windows and the source account are untouched.
+    // The windows and the vault are untouched.
     assert_windows(
         &env,
         (DAY0, 600_000_000),
@@ -338,7 +352,7 @@ fn burn_windows_overflow_is_error_not_panic() {
     assert_eq!(
         env.token_balance(&kettle),
         400_000_000,
-        "the source account is untouched"
+        "the vault is untouched"
     );
 }
 
@@ -431,49 +445,269 @@ fn burn_rejects_foreign_counters_account() {
 }
 
 // ===================================================================
-// NEGATIVE: SPL errors (the source's owner, an insufficient balance) and mint
-// substitutions.
+// NEGATIVE: the vault - substituting it or its authority, the token layer around
+// the program - plus an insufficient balance and a mint substitution.
 // ===================================================================
 
 #[test]
-fn burn_rejects_source_owned_by_stranger_with_spl_error() {
-    // The source belongs to a foreign wallet: our mint constraint passes, and SPL Token
-    // itself requires the owner's signature during the CPI → its OwnerMismatch code, NOT
-    // a BurnError.
+fn burn_rejects_any_account_but_the_vault() {
+    // `seeds = [b"vault"]` accepts ONLY the canonical vault. Three decoys, each a
+    // plausible substitute under some weaker binding, all rejected before any CPI:
     let mut env = TestEnv::new();
-    let (operator, _own_kettle) = setup_default(&mut env);
+    let (operator, vault) = setup_default(&mut env);
     let win = env.win_mint;
-    let stranger = env.actors.users[0].pubkey();
-    let foreign_kettle = kettle_with(&mut env, &stranger, 10_000_000_000);
+    let stranger = env.new_user();
+    // (1) The operator's OWN $1WIN account - the operator holds the token-level right
+    //     over it, and still the program burns from nothing but the vault.
+    let own_ata = ata_with(&mut env, &operator.pubkey(), 10_000_000_000);
+    // (2) A stranger's account.
+    let strangers_ata = ata_with(&mut env, &stranger.pubkey(), 10_000_000_000);
+    // (3) The ATA of vault_authority: the same mint and the same owner as the vault,
+    //     at a different address - "the same mint and the same authority" is not
+    //     uniqueness.
+    let authority_ata = ata_with(&mut env, &vault_authority_pda(), 10_000_000_000);
+
+    for (label, decoy) in [
+        ("the operator's own account", own_ata),
+        ("a stranger's account", strangers_ata),
+        ("the ATA of vault_authority", authority_ata),
+    ] {
+        env.expire_blockhash();
+        let r = send(
+            &mut env,
+            burn_ix(operator.pubkey(), decoy, win, 1_000_000_000),
+            &operator,
+        );
+        assert_eq!(
+            custom_error_code(&r),
+            Some(ErrorCode::ConstraintSeeds as u32),
+            "{label} in place of the vault → ConstraintSeeds: {r:?}"
+        );
+    }
+    // Nothing moved anywhere: the decoys, the vault, the supply, the windows.
+    for (label, decoy) in [
+        ("the operator's own account", own_ata),
+        ("the stranger's account", strangers_ata),
+        ("the ATA of vault_authority", authority_ata),
+    ] {
+        assert_eq!(
+            env.token_balance(&decoy),
+            10_000_000_000,
+            "{label} is intact"
+        );
+    }
+    assert_eq!(
+        env.token_balance(&vault),
+        100_000_000_000,
+        "the vault is intact"
+    );
+    assert_eq!(env.mint_supply(&win), 130_000_000_000, "nothing was burned");
+    assert_windows(&env, (0, 0), (0, 0), "the windows after the substitutions");
+
+    // The positive counterpart: the vault, the same amount.
+    env.expire_blockhash();
+    send(
+        &mut env,
+        burn_ix(operator.pubkey(), vault, win, 1_000_000_000),
+        &operator,
+    )
+    .expect("the vault passes");
+    assert_eq!(
+        env.token_balance(&vault),
+        99_000_000_000,
+        "the vault after the burn"
+    );
+}
+
+#[test]
+fn burn_rejects_foreign_vault_authority() {
+    // "Bring your own authority": the vault together with a foreign key as
+    // `vault_authority` - the seeds constraint rejects the authority; the program
+    // signs for its own PDA alone.
+    let mut env = TestEnv::new();
+    let (operator, vault) = setup_default(&mut env);
+    let win = env.win_mint;
+    let stranger = env.new_user();
 
     let r = send(
         &mut env,
-        burn_ix(operator.pubkey(), foreign_kettle, win, 1_000_000_000),
+        burn_ix_with_vault_authority(
+            operator.pubkey(),
+            vault,
+            stranger.pubkey(),
+            win,
+            1_000_000_000,
+        ),
         &operator,
     );
     assert_eq!(
         custom_error_code(&r),
-        Some(TokenError::OwnerMismatch as u32),
-        "a foreign source → SPL OwnerMismatch: {r:?}"
+        Some(ErrorCode::ConstraintSeeds as u32),
+        "a foreign vault_authority → ConstraintSeeds: {r:?}"
     );
-    // The foreign tokens are intact; the window mutation made BEFORE the CPI rolled back
-    // together with the transaction.
-    assert_eq!(env.token_balance(&foreign_kettle), 10_000_000_000);
-    assert_windows(&env, (0, 0), (0, 0), "the windows after the SPL rejection");
+    assert_eq!(
+        env.token_balance(&vault),
+        100_000_000_000,
+        "the vault is intact"
+    );
+    assert_windows(&env, (0, 0), (0, 0), "the windows after the rejection");
 }
 
 #[test]
-fn burn_insufficient_kettle_is_spl_error_and_windows_roll_back() {
+fn direct_spl_burn_and_transfer_out_of_vault_are_rejected() {
+    // The token layer around the program: the vault is owned by the vault_authority
+    // PDA, so SPL Token itself refuses a Burn or a Transfer signed by any key - the
+    // operator included. Tokens leave the vault through the program's `burn` alone,
+    // i.e. under the limits.
+    let mut env = TestEnv::new();
+    let (operator, vault) = setup_default(&mut env);
+    let win = env.win_mint;
+    let owner = env.actors.owner.insecure_clone();
+    let admin = env.actors.admin.insecure_clone();
+    let outside = env.create_ata(&operator.pubkey(), &win);
+
+    for actor in [&operator, &owner, &admin] {
+        env.expire_blockhash();
+        let r = send(
+            &mut env,
+            spl_burn_ix(vault, win, actor.pubkey(), 1_000_000_000),
+            actor,
+        );
+        assert_eq!(
+            custom_error_code(&r),
+            Some(TokenError::OwnerMismatch as u32),
+            "a direct SPL Burn signed by {} → OwnerMismatch: {r:?}",
+            actor.pubkey()
+        );
+        env.expire_blockhash();
+        let r = send(
+            &mut env,
+            spl_transfer_ix(vault, outside, actor.pubkey(), 1_000_000_000),
+            actor,
+        );
+        assert_eq!(
+            custom_error_code(&r),
+            Some(TokenError::OwnerMismatch as u32),
+            "a direct SPL Transfer signed by {} → OwnerMismatch: {r:?}",
+            actor.pubkey()
+        );
+    }
+    assert_eq!(
+        env.token_balance(&vault),
+        100_000_000_000,
+        "the vault is intact"
+    );
+    assert_eq!(env.token_balance(&outside), 0, "nothing left the vault");
+    assert_eq!(env.mint_supply(&win), 100_000_000_000, "nothing was burned");
+    assert_windows(&env, (0, 0), (0, 0), "the windows are untouched");
+
+    // The positive counterpart: the same amount through the program.
+    env.expire_blockhash();
+    send(
+        &mut env,
+        burn_ix(operator.pubkey(), vault, win, 1_000_000_000),
+        &operator,
+    )
+    .expect("through the program the burn passes");
+    assert_eq!(
+        env.token_balance(&vault),
+        99_000_000_000,
+        "the vault after the burn"
+    );
+    assert_eq!(
+        env.mint_supply(&win),
+        99_000_000_000,
+        "supply after the burn"
+    );
+}
+
+#[test]
+fn fund_and_burn_in_one_transaction_are_atomic() {
+    // The client's flow: a Transfer into the vault and the burn of the same amount
+    // in ONE transaction. The vault holds nothing between burns, and a burn the
+    // program rejects rolls the funding transfer back with it - the tokens never
+    // reach the vault.
+    let mut env = TestEnv::new();
+    env.warp_to(BASE_TS);
+    env.init_default_burn(); // daily 50e9
+    let operator = env.actors.operator.insecure_clone();
+    let win = env.win_mint;
+    let vault = vault_pda();
+    // The treasury: the operator's own account holding 100 tokens (10e9).
+    let treasury = ata_with(&mut env, &operator.pubkey(), 10_000_000_000);
+
+    // Within the limit: 20 tokens move into the vault and burn in the same
+    // transaction.
+    env.send_ixs(
+        &[
+            spl_transfer_ix(treasury, vault, operator.pubkey(), 2_000_000_000),
+            burn_ix(operator.pubkey(), vault, win, 2_000_000_000),
+        ],
+        &operator.pubkey(),
+        &[&operator],
+    )
+    .expect("transfer + burn within the limit pass");
+    assert_eq!(env.token_balance(&vault), 0, "the vault is empty again");
+    assert_eq!(
+        env.token_balance(&treasury),
+        8_000_000_000,
+        "the treasury after the burn"
+    );
+    assert_eq!(
+        env.mint_supply(&win),
+        8_000_000_000,
+        "supply after the burn"
+    );
+    assert_windows(
+        &env,
+        (DAY0, 2_000_000_000),
+        (WEEK0, 2_000_000_000),
+        "the windows after the burn",
+    );
+
+    // Above the daily limit (2e9 + 6e10 > 5e10): the burn is rejected and the
+    // transfer rolls back with it.
+    env.mint_to(&win, &treasury, 60_000_000_000);
+    env.expire_blockhash();
+    let r = env.send_ixs(
+        &[
+            spl_transfer_ix(treasury, vault, operator.pubkey(), 60_000_000_000),
+            burn_ix(operator.pubkey(), vault, win, 60_000_000_000),
+        ],
+        &operator.pubkey(),
+        &[&operator],
+    );
+    assert_eq!(
+        custom_error_code(&r),
+        Some(err(BurnError::DailyLimitExceeded)),
+        "transfer + a burn above the limit → DailyLimitExceeded: {r:?}"
+    );
+    assert_eq!(env.token_balance(&vault), 0, "nothing reached the vault");
+    assert_eq!(
+        env.token_balance(&treasury),
+        68_000_000_000,
+        "the treasury is untouched"
+    );
+    assert_windows(
+        &env,
+        (DAY0, 2_000_000_000),
+        (WEEK0, 2_000_000_000),
+        "the windows are untouched",
+    );
+}
+
+#[test]
+fn burn_insufficient_vault_is_spl_error_and_windows_roll_back() {
     // Atomicity: the windows are mutated BEFORE the CPI - a failing CPI must roll them
-    // back too. An insufficient source balance yields the SPL InsufficientFunds code.
+    // back too. An insufficient vault balance yields the SPL InsufficientFunds code.
     let mut env = TestEnv::new();
     env.warp_to(BASE_TS);
     env.init_default_burn();
     let operator = env.actors.operator.insecure_clone();
-    let kettle = kettle_with(&mut env, &operator.pubkey(), 1_000_000_000); // 10 tokens
+    let kettle = fund_vault(&mut env, 1_000_000_000); // 10 tokens
     let win = env.win_mint;
 
-    // The positive case: 6 tokens are burned and 4e8 remain in the source account.
+    // The positive case: 6 tokens are burned and 4e8 remain in the vault.
     send(
         &mut env,
         burn_ix(operator.pubkey(), kettle, win, 600_000_000),
@@ -498,7 +732,7 @@ fn burn_insufficient_kettle_is_spl_error_and_windows_roll_back() {
     assert_eq!(
         custom_error_code(&r),
         Some(TokenError::InsufficientFunds as u32),
-        "an insufficient source balance → SPL InsufficientFunds: {r:?}"
+        "an insufficient vault balance → SPL InsufficientFunds: {r:?}"
     );
     assert_windows(
         &env,
@@ -509,7 +743,7 @@ fn burn_insufficient_kettle_is_spl_error_and_windows_roll_back() {
     assert_eq!(
         env.token_balance(&kettle),
         400_000_000,
-        "the source account is untouched"
+        "the vault is untouched"
     );
 }
 
@@ -532,29 +766,6 @@ fn burn_rejects_foreign_mint_account() {
     );
 }
 
-#[test]
-fn burn_rejects_source_of_wrong_mint() {
-    // A source under a different mint (the operator's USDC ATA): the
-    // `token::mint = burn_state.token_mint` constraint → ConstraintTokenMint.
-    let mut env = TestEnv::new();
-    let (operator, _kettle) = setup_default(&mut env);
-    let win = env.win_mint;
-    let usdc = env.usdc_mint;
-    let usdc_ata = env.create_ata(&operator.pubkey(), &usdc);
-    env.mint_to(&usdc, &usdc_ata, 1_000_000_000);
-
-    let r = send(
-        &mut env,
-        burn_ix(operator.pubkey(), usdc_ata, win, 1_000_000_000),
-        &operator,
-    );
-    assert_eq!(
-        custom_error_code(&r),
-        Some(ErrorCode::ConstraintTokenMint as u32),
-        "a source under a foreign mint → ConstraintTokenMint: {r:?}"
-    );
-}
-
 // ===================================================================
 // PERIOD ROLLOVERS: the lazy reset of the accumulator windows.
 // ===================================================================
@@ -565,7 +776,7 @@ fn burn_day_rollover_resets_daily_accumulates_weekly() {
     env.warp_to(BASE_TS);
     env.init_default_burn(); // daily 50e9, weekly 200e9
     let operator = env.actors.operator.insecure_clone();
-    let kettle = kettle_with(&mut env, &operator.pubkey(), 200_000_000_000);
+    let kettle = fund_vault(&mut env, 200_000_000_000);
     let win = env.win_mint;
 
     // Day 23_149: we burn the FULL daily limit.
@@ -632,7 +843,7 @@ fn burn_week_rollover_resets_both_windows() {
     env.warp_to(BASE_TS);
     env.init_burn_with_limits(50_000_000_000, 60_000_000_000);
     let operator = env.actors.operator.insecure_clone();
-    let kettle = kettle_with(&mut env, &operator.pubkey(), 200_000_000_000);
+    let kettle = fund_vault(&mut env, 200_000_000_000);
     let win = env.win_mint;
 
     // Day 23_149 (week 3_307): the full daily limit.

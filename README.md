@@ -51,14 +51,15 @@ on behalf of recipients), **Recipient** (claims its own activity).
 
 ### Burn (`programs/burn`)
 
-Rate-limited burning of $1WIN out of a source token account.
+Rate-limited burning of $1WIN out of the program's vault.
 
 The Operator burns tokens under a daily and a weekly limit tracked per UTC period;
 the period windows reset lazily on the first burn of a new period, an excess is
 rejected rather than clamped, and the burned totals are kept in a dedicated
-accumulator rather than derived from balances. The Operator is both the role in the
-program's state and the SPL authority of the source account, so a burn requires
-both.
+accumulator rather than derived from balances. The vault is owned by a
+program-derived authority: the platform transfers the tokens to burn into it, the
+Operator triggers the burn, and tokens leave the vault only through `burn`, within
+the limits - no key can burn or transfer them directly.
 
 Roles: **Owner** (role rotation, two-step handover), **Admin** (limits),
 **Operator** (executes the burn).

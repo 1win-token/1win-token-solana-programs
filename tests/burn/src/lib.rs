@@ -9,7 +9,9 @@
 //! from the program's contexts (`initialize.rs` / `burn.rs`). The state readers are
 //! attached to [`TestEnv`] through the [`BurnTestEnv`] extension trait (the shared
 //! environment engine lives in `sale-test-common`, and a foreign type cannot be
-//! given an inherent impl).
+//! given an inherent impl). The raw SPL Token builders at the bottom drive the
+//! token layer directly - funding the vault the way a client does and the "around
+//! the program" negatives.
 
 use anchor_lang::{InstructionData, ToAccountMetas};
 use sale_test_common::TestEnv;
@@ -42,11 +44,22 @@ pub fn burn_event_authority_pda() -> Pubkey {
     Pubkey::find_program_address(&[b"__event_authority"], &burn::id()).0
 }
 
+/// The vault, seeds `[b"vault"]` (created in initialize.rs, debited in burn.rs).
+pub fn vault_pda() -> Pubkey {
+    Pubkey::find_program_address(&[b"vault"], &burn::id()).0
+}
+
+/// The data-less PDA that owns the vault and signs the burn CPI, seeds
+/// `[b"vault_authority"]`.
+pub fn vault_authority_pda() -> Pubkey {
+    Pubkey::find_program_address(&[b"vault_authority"], &burn::id()).0
+}
+
 // ---------- Instruction builders ----------
 
-/// `initialize`: `authority` (the upgrade authority) signs and pays the rent of BOTH
-/// singletons (`burn_state` + `burn_counters`); `token_mint` is the $1WIN mint (the
-/// tests swap it for the decimals negative).
+/// `initialize`: `authority` (the upgrade authority) signs and pays the rent of both
+/// singletons (`burn_state` + `burn_counters`) and of the vault; `token_mint` is the
+/// $1WIN mint (the tests swap it for the decimals negative).
 #[allow(clippy::too_many_arguments)]
 pub fn burn_initialize_ix(
     authority: Pubkey,
@@ -90,6 +103,9 @@ pub fn burn_initialize_ix_with_program_data(
         burn_state: burn_state_pda(),
         burn_counters: burn_counters_pda(),
         token_mint,
+        vault: vault_pda(),
+        vault_authority: vault_authority_pda(),
+        token_program: spl_token_interface::id(),
         system_program: solana_sdk_ids::system_program::id(),
         event_authority: burn_event_authority_pda(),
         program: burn::id(),
@@ -179,12 +195,20 @@ pub fn burn_set_operator_ix(owner: Pubkey, new: Pubkey) -> Instruction {
     burn_owner_ix(owner, burn::instruction::SetOperator { new }.data())
 }
 
-/// `burn`: the canonical set - the `burn_counters` accumulator at its own seeds; the
-/// program takes the period indices ONLY from Clock (there are no index arguments).
-/// `operator` signs (and pays no rent - nothing is created); `source` is the source
-/// token account (owned by the operator, or SPL would reject the CPI).
-pub fn burn_ix(operator: Pubkey, source: Pubkey, token_mint: Pubkey, amount: u64) -> Instruction {
-    burn_ix_with_counters(operator, burn_counters_pda(), source, token_mint, amount)
+/// `burn`: the canonical set - the `burn_counters` accumulator and the
+/// `vault_authority` PDA at their own seeds; the program takes the period indices
+/// ONLY from Clock (there are no index arguments). `operator` signs (and pays no
+/// rent - nothing is created); `vault` is [`vault_pda`], or a decoy in the
+/// negatives.
+pub fn burn_ix(operator: Pubkey, vault: Pubkey, token_mint: Pubkey, amount: u64) -> Instruction {
+    burn_ix_raw(
+        operator,
+        burn_counters_pda(),
+        vault,
+        vault_authority_pda(),
+        token_mint,
+        amount,
+    )
 }
 
 /// Same as [`burn_ix`], but `burn_counters` is passed explicitly - for the negatives
@@ -193,7 +217,44 @@ pub fn burn_ix(operator: Pubkey, source: Pubkey, token_mint: Pubkey, amount: u64
 pub fn burn_ix_with_counters(
     operator: Pubkey,
     burn_counters: Pubkey,
-    source: Pubkey,
+    vault: Pubkey,
+    token_mint: Pubkey,
+    amount: u64,
+) -> Instruction {
+    burn_ix_raw(
+        operator,
+        burn_counters,
+        vault,
+        vault_authority_pda(),
+        token_mint,
+        amount,
+    )
+}
+
+/// Same as [`burn_ix`], but `vault_authority` is passed explicitly - for the "bring
+/// your own authority" negative (the seeds constraint).
+pub fn burn_ix_with_vault_authority(
+    operator: Pubkey,
+    vault: Pubkey,
+    vault_authority: Pubkey,
+    token_mint: Pubkey,
+    amount: u64,
+) -> Instruction {
+    burn_ix_raw(
+        operator,
+        burn_counters_pda(),
+        vault,
+        vault_authority,
+        token_mint,
+        amount,
+    )
+}
+
+fn burn_ix_raw(
+    operator: Pubkey,
+    burn_counters: Pubkey,
+    vault: Pubkey,
+    vault_authority: Pubkey,
     token_mint: Pubkey,
     amount: u64,
 ) -> Instruction {
@@ -201,7 +262,8 @@ pub fn burn_ix_with_counters(
         burn_state: burn_state_pda(),
         operator,
         burn_counters,
-        source,
+        vault,
+        vault_authority,
         token_mint,
         token_program: spl_token_interface::id(),
         event_authority: burn_event_authority_pda(),
@@ -302,4 +364,40 @@ impl BurnTestEnv for TestEnv {
             .unwrap_or_else(|e| panic!("{mint} is not an SPL mint: {e}"))
             .supply
     }
+}
+
+// ---------- Raw SPL Token builders (the token layer around the program) ----------
+
+/// A direct SPL `Burn` from `account`, signed by `authority` - the "around the
+/// program" path: it never enters the Burn program, so its acceptance depends on
+/// the token layer alone.
+pub fn spl_burn_ix(account: Pubkey, mint: Pubkey, authority: Pubkey, amount: u64) -> Instruction {
+    spl_token_interface::instruction::burn(
+        &spl_token_interface::id(),
+        &account,
+        &mint,
+        &authority,
+        &[],
+        amount,
+    )
+    .expect("the Burn instruction")
+}
+
+/// A direct SPL `Transfer` from `account` to `destination`, signed by `authority`:
+/// funding the vault the way a client does, or the other "around the program" path.
+pub fn spl_transfer_ix(
+    account: Pubkey,
+    destination: Pubkey,
+    authority: Pubkey,
+    amount: u64,
+) -> Instruction {
+    spl_token_interface::instruction::transfer(
+        &spl_token_interface::id(),
+        &account,
+        &destination,
+        &authority,
+        &[],
+        amount,
+    )
+    .expect("the Transfer instruction")
 }

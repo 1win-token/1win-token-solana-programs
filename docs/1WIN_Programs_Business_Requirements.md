@@ -296,9 +296,9 @@
   reduces the total supply.
 - **BR-2.** The amount of tokens spent over the day is computed by the platform, and
   the burn is executed by the **Operator** with its own signature - a daily
-  operation is automated and does not require assembling a multisig. Tokens do not
-  accumulate in the program: the burn goes straight out of a source account
-  controlled by the Operator.
+  operation is automated and does not require assembling a multisig. The platform
+  transfers the tokens to burn into the program's vault, and the burn goes out of
+  it; the Operator triggers the burn but holds no authority over the vault.
 - **BR-3.** The burn amount is trusted off-chain input; what is controlled on-chain
   are the roles and the limits. The result of every burn is published as an event.
 

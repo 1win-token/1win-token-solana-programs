@@ -10,7 +10,7 @@ use burn::errors::BurnError;
 use burn::events::Initialized;
 use burn_tests::{
     burn_counters_pda, burn_initialize_ix, burn_initialize_ix_with_program_data, burn_state_pda,
-    BurnTestEnv,
+    vault_authority_pda, vault_pda, BurnTestEnv,
 };
 use sale_test_common::{custom_error_code, decode_event, TestEnv};
 use solana_instruction_error::InstructionError;
@@ -30,7 +30,7 @@ fn err(variant: BurnError) -> u32 {
 const DAILY: u64 = 11_000_000_000;
 const WEEKLY: u64 = 77_000_000_000;
 
-/// An init rejection is atomic: NEITHER of the two singletons was created.
+/// An init rejection is atomic: NONE of the three accounts was created.
 fn assert_no_singletons(env: &TestEnv, ctx: &str) {
     assert!(
         !env.burn_state_exists(),
@@ -39,6 +39,10 @@ fn assert_no_singletons(env: &TestEnv, ctx: &str) {
     assert!(
         !env.account_exists(&burn_counters_pda()),
         "{ctx}: burn_counters was not created"
+    );
+    assert!(
+        !env.account_exists(&vault_pda()),
+        "{ctx}: the vault was not created"
     );
 }
 
@@ -118,6 +122,15 @@ fn initialize_stores_all_fields_and_emits_event() {
     assert_eq!(c.day.burned, 0, "day.burned after init");
     assert_eq!(c.week.index, 0, "week.index after init");
     assert_eq!(c.week.burned, 0, "week.burned after init");
+
+    // The vault was created by that same initialize: a $1WIN account owned by the
+    // vault_authority PDA, empty.
+    assert_eq!(
+        env.token_account_mint_owner(&vault_pda()),
+        (win, vault_authority_pda()),
+        "the vault's (mint, owner)"
+    );
+    assert_eq!(env.token_balance(&vault_pda()), 0, "the vault is empty");
 
     // The Initialized event - its payload is an observable effect too.
     let ev: Initialized = decode_event(&r).expect("the Initialized event is emitted");
@@ -433,4 +446,5 @@ fn initialize_rejects_wrong_mint_decimals() {
         env.account_exists(&burn_counters_pda()),
         "burn_counters was created"
     );
+    assert!(env.account_exists(&vault_pda()), "the vault was created");
 }

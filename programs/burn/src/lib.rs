@@ -8,6 +8,7 @@ pub mod instructions;
 pub mod state;
 
 pub(crate) mod period;
+pub(crate) mod seeds;
 
 use instructions::*;
 

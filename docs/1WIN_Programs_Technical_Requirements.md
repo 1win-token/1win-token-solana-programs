@@ -88,7 +88,7 @@ Owner MS.
 |---|---|---|
 | The $1WIN mint | - (not a program) | mint_authority = Owner MS (revoked to `None` once the whole amount is issued - the sale plus every vesting bucket, §4) · freeze_authority = Ops MS (Admin) |
 | TokenSale | Owner MS | admin = Ops MS · operator = the Operator key |
-| Burn | Owner MS | admin = Ops MS (the parameters and limits) · operator = the Operator key - executing the burn (`burn`) and controlling the source account (§6.2) |
+| Burn | Owner MS | admin = Ops MS (the parameters and limits) · operator = the Operator key - executing the burn (`burn`); the vault is the program's (§6.2) |
 | Vesting | Owner MS | admin = Ops MS - the configuration: the TGE date (`set_tge`), an activity's recipient (`set_recipient`) and the withdrawal account (`set_withdrawal_authority`); the Owner handover is two-step (`propose_owner` → `accept_owner`, withdrawn by `cancel_owner_proposal`); operator = the Operator key - only the `claim` trigger (the tokens go to the recipient and it disposes of no funds); the recipient signs its own claim (§7) |
 
 Each contract's concrete operations live in its own section (§4 the mint, §5
@@ -665,16 +665,23 @@ Burning $1WIN on a daily schedule - permanently reducing the total supply.
 ### 6.2 The execution model
 
 1. The amount to burn for the day is computed off-chain.
-2. The backend assembles the burn transaction and signs it with the **operator**
-   key → execution. The program checks the signer against the `operator` in its own
-   state, checks the limits (§6.3) and burns the tokens; the Burn program needs no
-   vault of its own.
+2. The backend transfers that amount into the program's vault and signs `burn`
+   with the **operator** key → execution (both instructions fit in one
+   transaction; a rejected burn then rolls the transfer back with it). The program
+   checks the signer against the `operator` in its own state, checks the limits
+   (§6.3) and burns the tokens out of the vault, signing the token-level burn
+   itself.
 
-The source token account is a dedicated $1WIN SPL account under the project's
-control; its SPL authority is that same `operator` key (or `operator` is its
-delegate: SPL Token itself checks the right to debit during the CPI). The source
-account has no separate signer: the daily operation is executed by a single
-signature and does not require assembling a multisig.
+The vault is a $1WIN token account at a program-derived address, created at
+`initialize` and owned by the program's `vault_authority` PDA - an address with no
+private key, for which only the Burn program can sign. Any wallet can pay into the
+vault; the only way tokens leave it is `burn`, within the limits: no key, the
+operator's included, can burn or transfer them directly, and the program has no
+instruction that moves them anywhere but into a burn.
+
+The operator therefore holds a role and nothing else: it triggers the burn with a
+single signature (the daily operation still requires no multisig), while the right
+to debit the vault belongs to the program.
 
 The burn amount is a trusted off-chain input; what is controlled on-chain is the role
 and the limits. The result of every burn is published as an event and is not stored
@@ -688,11 +695,12 @@ on-chain.
   (`propose_owner` / `accept_owner`, cancelled with `cancel_owner_proposal`; §9.1);
   Admin and Operator are changed by Owner in one step (`set_admin` / `set_operator`).
   A role transfer emits a `RoleUpdated` event. Rotating `operator` instantly takes
-  the right to burn away from the previous key, even if that key still owns the
-  source account.
+  the right to burn away from the previous key: the operator holds no token-level
+  right over the vault, so no SPL-level step accompanies the rotation.
 - **The daily and weekly burn limits** are mutable parameters (Admin), set at
   initialization. The limits are the only on-chain ceiling on the hot operator key:
-  a burn beyond them is rejected.
+  a burn beyond them is rejected. Since the vault is the program's, they are also
+  the only way tokens leave it at all (§6.2).
 - Every burn is published as an event: the period indices, the burnt amount, and the
   amounts accumulated over the day and over the week. None of it is stored on-chain.
   The instruction's only argument is the amount: an argument that does not affect
@@ -1203,7 +1211,7 @@ personal data, no reasons for a block, no officer's notes and no risk score.
 | The Blacklist | an account per wallet | presence = blocked |
 | The Graylist | an account per wallet | the individual limits: `min_per_tx`, `max_per_tx`, `max_total` |
 | The sale's vaults | before activation - two token accounts; after - three (undersubscribed) or four (oversubscribed) | USDC: `deposit_vault` (taking contributions), on activation `proceeds_vault` (the proceeds) is added and - only on oversubscription - `refund_vault` (the refunds plus the reserve); $1WIN: `token_vault` (the minted emission). All of them under the shared `vault_authority` |
-| The Burn state | the state account + a counter-accumulator account | the daily and the weekly limit, the authorities (`owner`, `admin`, `operator`) and the Owner candidate (`pending_owner`, empty until a handover has begun - §9.1) - in the state account; the burnt-amount counters - in a separate accumulator singleton: the windows of the current UTC day and UTC week, where the window of an elapsed period is lazily reset on the first burn of a new one. The amount burnt by each burn lives in the events, not on-chain |
+| The Burn state | the state account + a counter-accumulator account + the vault | the daily and the weekly limit, the authorities (`owner`, `admin`, `operator`) and the Owner candidate (`pending_owner`, empty until a handover has begun - §9.1) - in the state account; the tokens to burn - in the vault, a $1WIN token account under the `vault_authority` PDA (§6.2); the burnt-amount counters - in a separate accumulator singleton: the windows of the current UTC day and UTC week, where the window of an elapsed period is lazily reset on the first burn of a new one. The amount burnt by each burn lives in the events, not on-chain |
 | The Vesting configuration | the state account (a singleton) | `owner`, `pending_owner` (the Owner candidate, empty until a handover has begun), `admin`, `operator`, `token_mint`, `withdrawal_authority`, `tge_ts`, `activity_count`, `vault_authority_bump` (§7.2) |
 | A Vesting activity | an account per activity + a $1WIN vault per activity | `recipient`, `reference_amount`, `claimed`, `tge_bps`, `monthly_bps`, `cliff_months`; the number of tranches and the deadlines are not stored (§7.1). The activity's vault is under the shared `vault_authority`, and the bucket label lives only in the event |
 
@@ -1285,8 +1293,9 @@ USDC mint (external)        $1WIN mint  (mint authority - Owner MS, freeze - Ops
 2. **TokenSale**, **Burn** and **Vesting** do not depend on one another and are deployed
    separately, in any order. TokenSale references both mints and creates
    `deposit_vault` and `token_vault` (the proceeds and refund vaults appear when Claim
-   is activated). Vesting references only the $1WIN mint; the activity vaults are
-   created together with the activities themselves (§7.2).
+   is activated). Burn references only the $1WIN mint and creates its vault at
+   `initialize` (§6.2). Vesting references only the $1WIN mint; the activity vaults
+   are created together with the activities themselves (§7.2).
 
 The upgrade authority of every program is Owner MS (§9.2). The order for Vesting:
 deploy → `initialize` signed by Owner MS (the right to initialize is bound to the

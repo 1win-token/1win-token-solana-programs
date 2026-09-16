@@ -6,6 +6,7 @@ use anchor_lang::prelude::*;
 
 use crate::errors::BurnError;
 use crate::events::{OwnerProposalCancelled, OwnerProposed, RoleKind, RoleUpdated};
+use crate::seeds::BURN_STATE_SEED;
 use crate::state::BurnState;
 
 #[derive(Accounts)]
@@ -13,7 +14,7 @@ use crate::state::BurnState;
 pub struct OwnerUpdate<'info> {
     #[account(
         mut,
-        seeds = [b"burn_state"],
+        seeds = [BURN_STATE_SEED],
         bump,
         has_one = owner @ BurnError::Unauthorized,
     )]
@@ -27,7 +28,7 @@ pub struct OwnerUpdate<'info> {
 #[derive(Accounts)]
 #[event_cpi]
 pub struct AcceptOwner<'info> {
-    #[account(mut, seeds = [b"burn_state"], bump)]
+    #[account(mut, seeds = [BURN_STATE_SEED], bump)]
     pub burn_state: Account<'info, BurnState>,
     pub new_owner: Signer<'info>,
 }

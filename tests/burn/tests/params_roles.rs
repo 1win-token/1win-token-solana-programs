@@ -21,12 +21,14 @@ use burn::errors::BurnError;
 use burn::events::{LimitsUpdated, OwnerProposalCancelled, RoleKind, RoleUpdated};
 use burn_tests::{
     burn_accept_owner_ix, burn_cancel_owner_proposal_ix, burn_ix, burn_propose_owner_ix,
-    burn_set_admin_ix, burn_set_limits_ix, burn_set_operator_ix, BurnTestEnv,
+    burn_set_admin_ix, burn_set_limits_ix, burn_set_operator_ix, spl_burn_ix, vault_pda,
+    BurnTestEnv,
 };
 use sale_test_common::{custom_error_code, decode_event, TestEnv};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
+use spl_token_interface::error::TokenError;
 
 /// The time base (the index derivation is in burn_exec.rs): day 23_149, week 3_307 -
 /// the expected accumulator window indices after a burn.
@@ -48,12 +50,13 @@ fn send(
     env.send_ixs(&[ix], &signer.pubkey(), &[signer])
 }
 
-/// The source account: the ATA of `wallet` for the $1WIN mint holding `amount` units.
-fn kettle_with(env: &mut TestEnv, wallet: &Pubkey, amount: u64) -> Pubkey {
+/// Mints `amount` units straight into the vault (created by initialize) and returns
+/// its address.
+fn fund_vault(env: &mut TestEnv, amount: u64) -> Pubkey {
     let mint = env.win_mint;
-    let ata = env.create_ata(wallet, &mint);
-    env.mint_to(&mint, &ata, amount);
-    ata
+    let vault = vault_pda();
+    env.mint_to(&mint, &vault, amount);
+    vault
 }
 
 // ===================================================================
@@ -69,7 +72,7 @@ fn set_limits_updates_state_emits_event_and_applies_to_burn() {
     env.init_burn_with_limits(1_000_000_000, 10_000_000_000);
     let admin = env.actors.admin.insecure_clone();
     let operator = env.actors.operator.insecure_clone();
-    let kettle = kettle_with(&mut env, &operator.pubkey(), 100_000_000_000);
+    let kettle = fund_vault(&mut env, 100_000_000_000);
     let win = env.win_mint;
 
     // 20 tokens is above the old daily limit - rejected.
@@ -700,18 +703,21 @@ fn cancel_owner_proposal_by_candidate_rejected() {
 
 #[test]
 fn set_operator_rotation_switches_burn_rights() {
+    // The operator is a role only - the vault is the program's - so the rotation is
+    // complete the moment the state field changes: nothing at the token layer
+    // accompanies it, for the old key or for the new one.
     let mut env = TestEnv::new();
     env.warp_to(BASE_TS);
     env.init_default_burn();
     let owner = env.actors.owner.insecure_clone();
     let old_operator = env.actors.operator.insecure_clone();
-    let old_kettle = kettle_with(&mut env, &old_operator.pubkey(), 10_000_000_000);
+    let vault = fund_vault(&mut env, 10_000_000_000);
     let win = env.win_mint;
 
     // The old operator's positive case: burn 10 tokens, the daily window = 1e9.
     send(
         &mut env,
-        burn_ix(old_operator.pubkey(), old_kettle, win, 1_000_000_000),
+        burn_ix(old_operator.pubkey(), vault, win, 1_000_000_000),
         &old_operator,
     )
     .expect("the old operator: burn passes");
@@ -742,12 +748,12 @@ fn set_operator_rotation_switches_burn_rights() {
     );
     assert_eq!(ev.new_pubkey, new_operator.pubkey(), "event.new_pubkey");
 
-    // The old operator can NO longer burn - even though it still owns the source account
-    // (SPL would let the debit through; the role's has_one rejects it).
+    // The old operator can NO longer burn through the program (the role's has_one
+    // rejects it) ...
     env.expire_blockhash();
     let r = send(
         &mut env,
-        burn_ix(old_operator.pubkey(), old_kettle, win, 1_000_000_000),
+        burn_ix(old_operator.pubkey(), vault, win, 1_000_000_000),
         &old_operator,
     );
     assert_eq!(
@@ -755,13 +761,31 @@ fn set_operator_rotation_switches_burn_rights() {
         Some(err(BurnError::Unauthorized)),
         "the old operator after the rotation → Unauthorized: {r:?}"
     );
+    // ... nor around it: the key never held a token-level right over the vault.
+    env.expire_blockhash();
+    let r = send(
+        &mut env,
+        spl_burn_ix(vault, win, old_operator.pubkey(), 1_000_000_000),
+        &old_operator,
+    );
+    assert_eq!(
+        custom_error_code(&r),
+        Some(TokenError::OwnerMismatch as u32),
+        "the old operator's direct SPL Burn → OwnerMismatch: {r:?}"
+    );
+    assert_eq!(
+        env.token_balance(&vault),
+        9_000_000_000,
+        "the vault is untouched by the old operator"
+    );
 
-    // The new operator can: its own source account, a burn of 20 tokens; the accumulator
-    // windows run THROUGH (per period, not per operator): 1e9 + 2e9 = 3e9.
-    let new_kettle = kettle_with(&mut env, &new_operator.pubkey(), 10_000_000_000);
+    // The new operator can - out of the same vault, with no token-layer step: a burn
+    // of 20 tokens; the accumulator windows run THROUGH (per period, not per
+    // operator): 1e9 + 2e9 = 3e9.
+    env.expire_blockhash();
     send(
         &mut env,
-        burn_ix(new_operator.pubkey(), new_kettle, win, 2_000_000_000),
+        burn_ix(new_operator.pubkey(), vault, win, 2_000_000_000),
         &new_operator,
     )
     .expect("the new operator: burn passes");
@@ -779,11 +803,16 @@ fn set_operator_rotation_switches_burn_rights() {
         c.week.burned, 3_000_000_000,
         "the weekly window runs through for the new operator"
     );
+    assert_eq!(
+        env.token_balance(&vault),
+        7_000_000_000,
+        "the vault after both operators' burns"
+    );
 }
 
 // ===================================================================
 // burn: the right belongs to the Operator ONLY - neither owner, nor admin, nor an
-// outsider burns even out of their OWN source account (BRD G-1).
+// outsider burns out of the vault (BRD G-1).
 // ===================================================================
 
 #[test]
@@ -795,17 +824,16 @@ fn burn_rejects_every_role_but_operator() {
     let admin = env.actors.admin.insecure_clone();
     let operator = env.actors.operator.insecure_clone();
     let stranger = env.new_user();
+    let vault = fund_vault(&mut env, 10_000_000_000);
     let win = env.win_mint;
 
-    // Each has its own funded source account: the rejection must come from the role
-    // check rather than from SPL (ownership of the source account is in order for all of
-    // them).
+    // Everyone addresses the very same vault: the rejection comes from the role check
+    // alone (nothing else about the call differs from the operator's).
     for actor in [&owner, &admin, &stranger] {
-        let kettle = kettle_with(&mut env, &actor.pubkey(), 10_000_000_000);
         env.expire_blockhash();
         let r = send(
             &mut env,
-            burn_ix(actor.pubkey(), kettle, win, 1_000_000_000),
+            burn_ix(actor.pubkey(), vault, win, 1_000_000_000),
             actor,
         );
         assert_eq!(
@@ -815,9 +843,9 @@ fn burn_rejects_every_role_but_operator() {
             actor.pubkey()
         );
         assert_eq!(
-            env.token_balance(&kettle),
+            env.token_balance(&vault),
             10_000_000_000,
-            "the source account of the rejected role is untouched"
+            "the vault is untouched by the rejected role"
         );
     }
     // Nothing was burned: the accumulator holds the init values.
@@ -826,11 +854,10 @@ fn burn_rejects_every_role_but_operator() {
     assert_eq!(c.week.burned, 0, "week.burned after the rejections");
 
     // The positive counterpart in the same config: the operator burns.
-    let op_kettle = kettle_with(&mut env, &operator.pubkey(), 10_000_000_000);
     env.expire_blockhash();
     send(
         &mut env,
-        burn_ix(operator.pubkey(), op_kettle, win, 1_000_000_000),
+        burn_ix(operator.pubkey(), vault, win, 1_000_000_000),
         &operator,
     )
     .expect("operator: burn passes");
@@ -842,9 +869,9 @@ fn burn_rejects_every_role_but_operator() {
     );
     assert_eq!(c.week.index, WEEK0, "week.index after the operator's burn");
     assert_eq!(
-        env.token_balance(&op_kettle),
+        env.token_balance(&vault),
         9_000_000_000,
-        "the operator's source account dropped by the burned amount"
+        "the vault dropped by the burned amount"
     );
 }
 

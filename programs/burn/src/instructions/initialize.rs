@@ -1,11 +1,12 @@
-//! `initialize`: creates the `BurnState` and `BurnCounters` singletons. The
-//! right to init is bound to the program's upgrade authority.
+//! `initialize`: creates the `BurnState` and `BurnCounters` singletons and the
+//! vault. The right to init is bound to the program's upgrade authority.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::Mint;
+use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::errors::BurnError;
 use crate::events::Initialized;
+use crate::seeds::{BURN_COUNTERS_SEED, BURN_STATE_SEED, VAULT_AUTHORITY_SEED, VAULT_SEED};
 use crate::state::{BurnCounters, BurnState, PeriodWindow, TOKEN_DECIMALS};
 
 #[derive(Accounts)]
@@ -22,7 +23,7 @@ pub struct Initialize<'info> {
 
     #[account(
         init,
-        seeds = [b"burn_state"],
+        seeds = [BURN_STATE_SEED],
         bump,
         payer = authority,
         space = 8 + BurnState::INIT_SPACE,
@@ -31,7 +32,7 @@ pub struct Initialize<'info> {
 
     #[account(
         init,
-        seeds = [b"burn_counters"],
+        seeds = [BURN_COUNTERS_SEED],
         bump,
         payer = authority,
         space = 8 + BurnCounters::INIT_SPACE,
@@ -40,6 +41,24 @@ pub struct Initialize<'info> {
 
     pub token_mint: Account<'info, Mint>,
 
+    /// The vault the burns are made from (§6.2): tokens are transferred into it
+    /// and leave it only through `burn`.
+    #[account(
+        init,
+        seeds = [VAULT_SEED],
+        bump,
+        payer = authority,
+        token::mint = token_mint,
+        token::authority = vault_authority,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    /// CHECK: the data-less PDA that owns the vault; the address comes from the
+    /// seeds, the bump is recomputed.
+    #[account(seeds = [VAULT_AUTHORITY_SEED], bump)]
+    pub vault_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 

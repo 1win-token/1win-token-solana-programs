@@ -1,5 +1,5 @@
-//! `burn` - the Operator burns tokens out of the source token account, checking
-//! the daily and weekly limits of the current UTC period (§6.2, §6.3).
+//! `burn` - the Operator burns tokens out of the vault, checking the daily and
+//! weekly limits of the current UTC period (§6.2, §6.3).
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount};
@@ -7,36 +7,39 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount};
 use crate::errors::BurnError;
 use crate::events::BurnExecuted;
 use crate::period::{accumulate, period_indices};
+use crate::seeds::{BURN_COUNTERS_SEED, BURN_STATE_SEED, VAULT_AUTHORITY_SEED, VAULT_SEED};
 use crate::state::{BurnCounters, BurnState, PeriodWindow};
 
 #[derive(Accounts)]
 #[event_cpi]
 pub struct Burn<'info> {
     #[account(
-        seeds = [b"burn_state"],
+        seeds = [BURN_STATE_SEED],
         bump,
         has_one = operator @ BurnError::Unauthorized,
     )]
     pub burn_state: Account<'info, BurnState>,
 
-    /// Operator (automation hot key) - executes the burn and is the SPL
-    /// authority of the source account: the role is checked by has_one, while
-    /// the right to debit is enforced by SPL Token itself during the CPI.
-    /// Admin (ops multisig) cannot burn - the role permission sets are disjoint
-    /// (BRD G-1, BR-7).
+    /// Operator (automation hot key) - executes the burn; the role is checked by
+    /// has_one. Admin (ops multisig) cannot burn - the role permission sets are
+    /// disjoint (BRD G-1, BR-7).
     pub operator: Signer<'info>,
 
     #[account(
         mut,
-        seeds = [b"burn_counters"],
+        seeds = [BURN_COUNTERS_SEED],
         bump,
     )]
     pub burn_counters: Account<'info, BurnCounters>,
 
-    /// The source of the tokens being burned (§6.2); ownership is verified by
-    /// SPL Token itself during the burn CPI.
-    #[account(mut, token::mint = burn_state.token_mint)]
-    pub source: Account<'info, TokenAccount>,
+    /// The vault the tokens are burned from (§6.2).
+    #[account(mut, seeds = [VAULT_SEED], bump)]
+    pub vault: Account<'info, TokenAccount>,
+
+    /// CHECK: the data-less PDA that owns the vault and signs the burn CPI; the
+    /// address comes from the seeds, the bump is recomputed.
+    #[account(seeds = [VAULT_AUTHORITY_SEED], bump)]
+    pub vault_authority: UncheckedAccount<'info>,
 
     #[account(mut, address = burn_state.token_mint @ BurnError::InvalidMint)]
     pub token_mint: Account<'info, Mint>,
@@ -88,19 +91,19 @@ pub fn burn(ctx: Context<Burn>, amount: u64) -> Result<()> {
         burned: week_total,
     };
 
-    // 5. CPI: SPL Token itself requires the source owner's signature - a source
-    //    the operator neither owns nor is delegated on is rejected. An
-    //    insufficient source balance is likewise an SPL error; we do not
-    //    duplicate that pre-check - bookkeeping runs on our own counters, not
-    //    on the balance.
+    // 5. CPI: the program signs as the vault's authority. An insufficient vault
+    //    balance is an SPL error; we do not duplicate that pre-check -
+    //    bookkeeping runs on our own counters, not on the balance.
+    let signer_seeds: &[&[&[u8]]] = &[&[VAULT_AUTHORITY_SEED, &[ctx.bumps.vault_authority]]];
     token::burn(
-        CpiContext::new(
+        CpiContext::new_with_signer(
             ctx.accounts.token_program.key(),
             token::Burn {
                 mint: ctx.accounts.token_mint.to_account_info(),
-                from: ctx.accounts.source.to_account_info(),
-                authority: ctx.accounts.operator.to_account_info(),
+                from: ctx.accounts.vault.to_account_info(),
+                authority: ctx.accounts.vault_authority.to_account_info(),
             },
+            signer_seeds,
         ),
         amount,
     )?;

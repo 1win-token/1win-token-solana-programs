@@ -5,6 +5,7 @@ use anchor_lang::prelude::*;
 
 use crate::errors::BurnError;
 use crate::events::LimitsUpdated;
+use crate::seeds::BURN_STATE_SEED;
 use crate::state::BurnState;
 
 /// The shared context of the Admin instructions.
@@ -13,7 +14,7 @@ use crate::state::BurnState;
 pub struct AdminUpdate<'info> {
     #[account(
         mut,
-        seeds = [b"burn_state"],
+        seeds = [BURN_STATE_SEED],
         bump,
         has_one = admin @ BurnError::Unauthorized,
     )]
