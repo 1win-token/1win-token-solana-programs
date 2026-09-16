@@ -7,7 +7,7 @@ use anchor_lang::prelude::*;
 pub enum SaleError {
     #[msg("Arithmetic overflow or invalid numeric downcast")]
     MathOverflow,
-    #[msg("Mint decimals out of representable range (10^decimals must fit in u64)")]
+    #[msg("token_mint must use 8 decimals and usdc_mint must use 6 decimals")]
     InvalidMintDecimals,
     #[msg("Signer is not the authority required for this instruction")]
     Unauthorized,
