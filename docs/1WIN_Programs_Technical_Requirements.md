@@ -1219,11 +1219,11 @@ next free code and the codes of the existing ones never change. The merged varia
   operationally - by the index of the failing instruction in the transaction (in the
   mint transaction of §4 the code comes from `assert_funded` on a specific activity,
   outside it - from `claim`).
-- `InvalidAuthority` - four invariants: a zero `owner`, `admin` or `operator`;
-  `withdrawal_authority == vault_authority` (on both write paths of the withdrawal
-  target); a zero recipient; a recipient `== vault_authority`. The violation is told
-  apart by the instruction and by the set of accounts it supplied; each check has a
-  negative test of its own.
+- `InvalidAuthority` - five invariants: a zero `owner`, `admin` or `operator`; a zero
+  `withdrawal_authority`; `withdrawal_authority == vault_authority` (on both write
+  paths of the withdrawal target); a zero recipient; a recipient `== vault_authority`.
+  The violation is told apart by the instruction and by the set of accounts it
+  supplied; each check has a negative test of its own.
 - `InvalidBeneficiary` - two invariants on the single `beneficiary_token` slot in
   `cancel_vesting` / `close_vesting`: the owner is not equal to
   `config.withdrawal_authority`, and coinciding with the activity's storage. The second

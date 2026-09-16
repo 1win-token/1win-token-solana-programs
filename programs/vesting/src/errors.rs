@@ -8,13 +8,13 @@ use anchor_lang::prelude::*;
 pub enum VestingError {
     #[msg("Arithmetic overflow or invalid numeric downcast")]
     MathOverflow,
-    #[msg("Signer is not the Owner of the vesting config")]
+    #[msg("Signer is not the Owner: Owner instructions require config.owner, accept_owner requires config.pending_owner")]
     NotOwner,
     #[msg("Signer is not the upgrade authority of the program")]
     NotUpgradeAuthority,
     #[msg("Signer is neither the activity recipient nor the operator")]
     NotAuthorized,
-    #[msg("Role/recipient pubkey is the default (zero) one, recipient is the vault_authority, two of the three roles share one key, or withdrawal_authority is zero or the vault_authority")]
+    #[msg("Role, recipient or withdrawal_authority pubkey is the default (zero) one, or the recipient or withdrawal_authority is the vault_authority")]
     InvalidAuthority,
     #[msg("token_mint does not match the mint fixed in the vesting config")]
     InvalidMint,
@@ -38,7 +38,7 @@ pub enum VestingError {
     ScheduleNotStarted,
     #[msg("Nothing is claimable at this time")]
     NothingToClaim,
-    #[msg("Activity vault holds less than the claimable amount")]
+    #[msg("Activity vault is underfunded: claim requires the claimable amount, assert_funded requires the unclaimed remainder of reference_amount")]
     InsufficientVaultBalance,
     #[msg("Activity is not fully claimed yet")]
     NotFullyClaimed,
