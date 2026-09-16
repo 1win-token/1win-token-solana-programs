@@ -361,6 +361,14 @@ permanently non-refundable, by the participant's own decision. The curve check h
 no such weakness: the address does not change, so a check at the entry holds for the
 whole lifecycle of participation.
 
+The same holds one level down, for the participant's token accounts. The SPL
+authority of a token account - the wallet's USDC ATA included - is a field the wallet
+rewrites on its own signature, the account can be closed, and an existing one can be
+frozen by the issuer; a refund bound to such an account would fail by the
+participant's decision just the same. The refund therefore reads and writes no
+account of the participant's at all: the USDC and the deposit's rent go into a fresh
+account the refund creates for that deposit (§5.4).
+
 One wallet is unlimited in the number of purchases and the contributions add up.
 Every contribution is recorded as a **separate deposit** (so that an individual
 purchase can be refunded, §5.4), and the wallet's total contribution in a per-wallet
@@ -437,14 +445,22 @@ take the address off the Blacklist is likewise made off-chain.
 - **For a refund** the backend calls `refund(index)` with the deposit's number; the
   contributing wallet is passed as an account (a deposit is bound to a wallet and an
   index through its seeds) and `index` is the number of the purchase being refunded.
-  The contract takes the amount from the deposit itself, returns the USDC to the
-  wallet, decreases the wallet's total contribution and the pool's size, and **closes
-  the deposit** (closing = returning the rent to the user owner and protecting
-  against a repeated refund: a repeated call will not find the account and returns an
-  error).
-- If the recipient wallet's USDC account (ATA) does not exist (the user closed it),
-  the instruction creates it in the same transaction (`init_if_needed` with full mint
-  + authority constraints; paid for by the project / the operator).
+  The contract takes the amount from the deposit itself, returns the USDC into the
+  deposit's refund account, decreases the wallet's total contribution and the pool's
+  size, and **closes the deposit** into that same account (closing = returning the
+  rent to the user owner, together with the USDC, and protecting against a repeated
+  refund: a repeated call will not find the account and returns an error).
+- **The refund account** is a fresh USDC token account at a program-derived address
+  (seeds: the wallet and the purchase index) that the instruction creates in the same
+  transaction with the wallet as its SPL authority; the operator pays its rent, and
+  that rent is never refunded to the operator (it is the operator's operational cost -
+  the wallet may close the account and take it). The refund uses no account of the
+  wallet's - not its ATA, whose authority the wallet can hand to another key and which
+  can be closed or frozen by the issuer, and not the wallet account itself, which is
+  neither read nor written - deliberately, so that nothing a participant or the
+  issuer controls can block a forced refund. The address is derived from the wallet
+  and the index, which the `Refunded` event carries; the backend derives it the same
+  way to find the returned funds.
 - **A refund is available only until the pool is fixed:** `refund` reverts when
   `pool_fixed` is set. After the fixation the pool and the allocations are immutable.
 - The "transaction → deposit number" mapping is kept by the backend; the on-chain key
@@ -1211,6 +1227,7 @@ personal data, no reasons for a block, no officer's notes and no risk score.
 | The Blacklist | an account per wallet | presence = blocked |
 | The Graylist | an account per wallet | the individual limits: `min_per_tx`, `max_per_tx`, `max_total` |
 | The sale's vaults | before activation - two token accounts; after - three (undersubscribed) or four (oversubscribed) | USDC: `deposit_vault` (taking contributions), on activation `proceeds_vault` (the proceeds) is added and - only on oversubscription - `refund_vault` (the refunds plus the reserve); $1WIN: `token_vault` (the minted emission). All of them under the shared `vault_authority` |
+| The refund accounts | a token account per refunded deposit | the USDC returned by a compliance refund (the deposit's amount) plus the closed deposit's rent; the SPL authority is the contributing wallet - a participant's account, created by the program and never closed by it (§5.4) |
 | The Burn state | the state account + a counter-accumulator account + the vault | the daily and the weekly limit, the authorities (`owner`, `admin`, `operator`) and the Owner candidate (`pending_owner`, empty until a handover has begun - §9.1) - in the state account; the tokens to burn - in the vault, a $1WIN token account under the `vault_authority` PDA (§6.2); the burnt-amount counters - in a separate accumulator singleton: the windows of the current UTC day and UTC week, where the window of an elapsed period is lazily reset on the first burn of a new one. The amount burnt by each burn lives in the events, not on-chain |
 | The Vesting configuration | the state account (a singleton) | `owner`, `pending_owner` (the Owner candidate, empty until a handover has begun), `admin`, `operator`, `token_mint`, `withdrawal_authority`, `tge_ts`, `activity_count`, `vault_authority_bump` (§7.2) |
 | A Vesting activity | an account per activity + a $1WIN vault per activity | `recipient`, `reference_amount`, `claimed`, `tge_bps`, `monthly_bps`, `cliff_months`; the number of tranches and the deadlines are not stored (§7.1). The activity's vault is under the shared `vault_authority`, and the bucket label lives only in the event |
@@ -1247,7 +1264,7 @@ auxiliary layer for display.
 The operations are split into two classes by the level of authorization:
 
 - **Operator (the automation key):** the automation - Blacklist add/remove, `refund`
-  (before the pool is fixed, refunded strictly to the originating wallet), batch-closing
+  (before the pool is fixed, refunded into an account whose SPL authority is the originating wallet), batch-closing
   accounts, the daily burn (`burn`, §6 - within the daily/weekly limits that Admin
   sets). Owner can replace the operator address at any time without an upgrade - up to
   and including moving the role onto a multisig.

@@ -7,7 +7,9 @@
 //! System Program, so a participant could buy with an ordinary wallet, `assign` it to
 //! their own program and become unreachable for bans, limits and refunds while
 //! continuing to buy and claim. Now the wallet in the lists is an instruction
-//! argument, and in `refund` it is an account with no owner check.
+//! argument, and in `refund` it is an address only: no owner check, and nothing of
+//! the account is read or written - the USDC lands in a fresh account of the
+//! wallet's, and the closed deposit's rent follows it there.
 //!
 //! Here the wallet is moved under a program by a genuine `assign`, the same way a
 //! participant could: the wallet itself signs and a separate address pays the fee.
@@ -18,8 +20,8 @@ use anchor_lang::error::{ErrorCode as AnchorError, ERROR_CODE_OFFSET};
 use sale::errors::SaleError;
 use sale_test_common::{
     blacklist_add_ix, blacklist_add_ix_with_slot, blacklist_pda, blacklist_remove_ix,
-    custom_error_code, deposit_vault_pda, graylist_create_ix, graylist_remove_ix,
-    graylist_update_ix, init_aggregate_ix, purchase_ix, refund_ix, wallet_usdc_ata, TestEnv,
+    custom_error_code, deposit_pda, deposit_vault_pda, graylist_create_ix, graylist_remove_ix,
+    graylist_update_ix, init_aggregate_ix, purchase_ix, refund_account_pda, refund_ix, TestEnv,
 };
 use solana_instruction_error::InstructionError;
 use solana_keypair::Keypair;
@@ -341,6 +343,10 @@ fn refund_returns_usdc_to_program_owned_wallet() {
     // The wallet moves under a foreign program - which used to cut it off from refunds.
     let foreign_program = assign_to_foreign_program(&mut env, &wallet);
     let lamports_before = env.lamports_of(&wallet.pubkey());
+    let deposit_rent = env.lamports_of(&deposit_pda(&wallet.pubkey(), 0));
+    let refund_rent = env
+        .svm
+        .minimum_balance_for_rent_exemption(spl_token_interface::state::Account::LEN);
 
     env.expire_blockhash();
     send(
@@ -350,16 +356,18 @@ fn refund_returns_usdc_to_program_owned_wallet() {
     )
     .expect("a refund to a wallet under a foreign program passes");
 
+    let refund = refund_account_pda(&wallet.pubkey(), 0);
     assert_eq!(
-        env.token_balance(&ata),
+        env.token_balance(&refund),
         25_000_000,
-        "exactly $25 came back to the wallet's ATA"
+        "exactly $25 landed in the wallet's refund account"
     );
     assert_eq!(
-        wallet_usdc_ata(&wallet.pubkey(), &usdc),
-        ata,
-        "the refund landed in the wallet's canonical ATA"
+        env.token_account_mint_owner(&refund),
+        (usdc, wallet.pubkey()),
+        "the USDC mint, with the wallet itself in charge of the account"
     );
+    assert_eq!(env.token_balance(&ata), 0, "the ATA is not involved");
     assert_eq!(
         env.token_balance(&vault),
         15_000_000,
@@ -383,9 +391,15 @@ fn refund_returns_usdc_to_program_owned_wallet() {
         15_000_000,
         "the overall pool decreased by $25"
     );
-    assert!(
-        env.lamports_of(&wallet.pubkey()) > lamports_before,
-        "the closed deposit's rent went to the wallet, foreign program and all"
+    assert_eq!(
+        env.lamports_of(&refund),
+        refund_rent + deposit_rent,
+        "the closed deposit's rent followed the USDC into the refund account"
+    );
+    assert_eq!(
+        env.lamports_of(&wallet.pubkey()),
+        lamports_before,
+        "the wallet account itself was not touched, foreign program and all"
     );
     assert_eq!(
         owner_of(&env, &wallet.pubkey()),
@@ -395,15 +409,15 @@ fn refund_returns_usdc_to_program_owned_wallet() {
 }
 
 // ===================================================================
-// refund: the wallet has no USDC account - the refund creates it itself
+// refund: the wallet has no USDC account - the refund needs none
 // ===================================================================
 
 #[test]
-fn refund_creates_missing_ata_for_program_owned_wallet() {
+fn refund_creates_refund_account_for_program_owned_wallet() {
     // The same contribution layout as above, but the wallet closed its own USDC account
-    // before moving under the program. The refund then recreates the account - this is
-    // the only place where the runtime still touches the wallet through a CPI, and there
-    // it acts as the authority of the account being created.
+    // before moving under the program. The refund needs no account of the wallet's: it
+    // creates the refund account itself, with the wallet's key as the authority, and
+    // touches nothing the wallet owns.
     const DEPOSIT_0: u64 = 25_000_000;
     const DEPOSIT_1: u64 = 15_000_000;
     const FUNDED: u64 = 40_000_000;
@@ -455,7 +469,7 @@ fn refund_creates_missing_ata_for_program_owned_wallet() {
 
     let foreign_program = assign_to_foreign_program(&mut env, &wallet);
 
-    let ata_rent = env
+    let refund_rent = env
         .svm
         .minimum_balance_for_rent_exemption(spl_token_interface::state::Account::LEN);
     let operator_lamports_before = env.lamports_of(&operator.pubkey());
@@ -466,29 +480,29 @@ fn refund_creates_missing_ata_for_program_owned_wallet() {
         refund_ix(operator.pubkey(), wallet.pubkey(), 0, usdc),
         &operator,
     )
-    .expect("the refund creates a USDC account for a wallet under a foreign program");
+    .expect("the refund of a wallet under a foreign program with no USDC account passes");
 
+    let refund = refund_account_pda(&wallet.pubkey(), 0);
     assert!(
-        env.account_exists(&ata),
-        "the wallet's USDC account was created by the refund"
+        env.account_exists(&refund),
+        "the refund account was created by the refund"
+    );
+    assert!(
+        !env.account_exists(&ata),
+        "the wallet's ATA stays closed - nothing was recreated"
     );
     assert_eq!(
-        wallet_usdc_ata(&wallet.pubkey(), &usdc),
-        ata,
-        "it was created at the canonical address"
-    );
-    assert_eq!(
-        env.token_balance(&ata),
+        env.token_balance(&refund),
         25_000_000,
         "the created account holds exactly $25"
     );
     assert_eq!(
-        env.token_account_mint_owner(&ata),
+        env.token_account_mint_owner(&refund),
         (usdc, wallet.pubkey()),
         "the USDC mint, with the wallet itself in charge of the account"
     );
     assert!(
-        operator_lamports_before.saturating_sub(env.lamports_of(&operator.pubkey())) >= ata_rent,
+        operator_lamports_before.saturating_sub(env.lamports_of(&operator.pubkey())) >= refund_rent,
         "the operator paid the new account's rent"
     );
     assert_eq!(

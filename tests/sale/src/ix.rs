@@ -68,6 +68,16 @@ pub fn deposit_pda(wallet: &Pubkey, index: u64) -> Pubkey {
     .0
 }
 
+/// A deposit's refund account, seeds `[b"refund_account", wallet, index_le]`
+/// (refund.rs, §9.8): the fresh USDC account the refund lands in.
+pub fn refund_account_pda(wallet: &Pubkey, index: u64) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"refund_account", wallet.as_ref(), &index.to_le_bytes()],
+        &sale::id(),
+    )
+    .0
+}
+
 /// The proceeds vault, seeds `[b"proceeds_vault"]` (activate_claim.rs, §9.9).
 pub fn proceeds_vault_pda() -> Pubkey {
     Pubkey::find_program_address(&[b"proceeds_vault"], &sale::id()).0
@@ -78,7 +88,7 @@ pub fn refund_vault_pda() -> Pubkey {
     Pubkey::find_program_address(&[b"refund_vault"], &sale::id()).0
 }
 
-/// A wallet's ATA for the USDC mint - the `refund` recipient (§9.8, §9.10).
+/// A wallet's ATA for the USDC mint - the recipient of the claim refund (§9.10).
 pub fn wallet_usdc_ata(wallet: &Pubkey, usdc_mint: &Pubkey) -> Pubkey {
     spl_associated_token_account_interface::address::get_associated_token_address(wallet, usdc_mint)
 }
@@ -591,12 +601,19 @@ pub fn purchase_ix_with_slots(
     }
 }
 
-/// `refund(index)`: the canonical set. `operator` signs and pays the rent of the ATA
-/// being (re)created; `wallet` is the deposit's owner (the recipient of the refund
-/// and of the closing rent) and its owning program is not checked; the deposit,
-/// aggregate, ATA and vault are the canonical PDAs.
+/// `refund(index)`: the canonical set. `operator` signs and pays the rent of the
+/// refund account being created; `wallet` is the deposit's owner - an address only,
+/// read-only in the instruction; the deposit, aggregate, refund account and vault are
+/// the canonical PDAs.
 pub fn refund_ix(operator: Pubkey, wallet: Pubkey, index: u64, usdc_mint: Pubkey) -> Instruction {
-    refund_ix_with_vault(operator, wallet, index, usdc_mint, deposit_vault_pda())
+    refund_ix_with_slots(
+        operator,
+        wallet,
+        index,
+        usdc_mint,
+        deposit_vault_pda(),
+        refund_account_pda(&wallet, index),
+    )
 }
 
 /// Same as [`refund_ix`], but `deposit_vault` is passed explicitly - for the vault
@@ -608,18 +625,38 @@ pub fn refund_ix_with_vault(
     usdc_mint: Pubkey,
     deposit_vault: Pubkey,
 ) -> Instruction {
+    refund_ix_with_slots(
+        operator,
+        wallet,
+        index,
+        usdc_mint,
+        deposit_vault,
+        refund_account_pda(&wallet, index),
+    )
+}
+
+/// The general form: `deposit_vault` and `refund_account` are passed explicitly - for
+/// the substitution negatives (a foreign vault → ConstraintAddress; any account but
+/// the deposit's own refund PDA → ConstraintSeeds).
+pub fn refund_ix_with_slots(
+    operator: Pubkey,
+    wallet: Pubkey,
+    index: u64,
+    usdc_mint: Pubkey,
+    deposit_vault: Pubkey,
+    refund_account: Pubkey,
+) -> Instruction {
     let accounts = sale::accounts::Refund {
         sale_state: sale_state_pda(),
         operator,
         wallet,
         deposit: deposit_pda(&wallet, index),
         aggregate: aggregate_pda(&wallet),
-        wallet_usdc_ata: wallet_usdc_ata(&wallet, &usdc_mint),
+        refund_account,
         deposit_vault,
         vault_authority: vault_authority_pda(),
         usdc_mint,
         token_program: spl_token_interface::id(),
-        associated_token_program: spl_associated_token_account_interface::program::ID,
         system_program: solana_sdk_ids::system_program::id(),
         event_authority: event_authority_pda(),
         program: sale::id(),

@@ -85,14 +85,21 @@ impl TestEnv {
     /// actor (as in production after "deploy → SetAuthority to the Owner MS",
     /// Arch §9.1).
     pub fn new() -> Self {
-        Self::build(None, true)
+        Self::build(None, true, false)
+    }
+
+    /// The same as [`TestEnv::new`], but the USDC mint has a freeze authority (the
+    /// `payer`) - the shape of an administered stablecoin, whose issuer can freeze any
+    /// token account of the mint ([`TestEnv::freeze_account`]).
+    pub fn with_usdc_freeze_authority() -> Self {
+        Self::build(None, true, true)
     }
 
     /// The same, but the upgrade authority (of both programs) is an arbitrary key (for
     /// the negatives: front-running `initialize` with a signer that does not hold the
     /// upgrade authority).
     pub fn with_upgrade_authority(authority: Pubkey) -> Self {
-        Self::build(Some(authority), true)
+        Self::build(Some(authority), true, false)
     }
 
     /// The same as [`TestEnv::new`], but transaction signatures are not verified. This
@@ -105,10 +112,10 @@ impl TestEnv {
     /// Transactions here are sent through [`TestEnv::send_ixs_unsigned`]; the ordinary
     /// [`TestEnv::send_ixs`] with real signatures works too.
     pub fn without_sigverify() -> Self {
-        Self::build(None, false)
+        Self::build(None, false, false)
     }
 
-    fn build(upgrade_authority: Option<Pubkey>, sigverify: bool) -> Self {
+    fn build(upgrade_authority: Option<Pubkey>, sigverify: bool, usdc_freeze: bool) -> Self {
         let mut svm = LiteSVM::new().with_sigverify(sigverify);
 
         let owner = Keypair::new();
@@ -138,8 +145,14 @@ impl TestEnv {
             authority,
         );
 
-        let usdc_mint = crate::token::create_mint(&mut svm, &payer, crate::USDC_DECIMALS);
-        let win_mint = crate::token::create_mint(&mut svm, &payer, crate::WIN_DECIMALS);
+        let usdc_freeze_authority = usdc_freeze.then(|| payer.pubkey());
+        let usdc_mint = crate::token::create_mint(
+            &mut svm,
+            &payer,
+            crate::USDC_DECIMALS,
+            usdc_freeze_authority.as_ref(),
+        );
+        let win_mint = crate::token::create_mint(&mut svm, &payer, crate::WIN_DECIMALS, None);
 
         Self {
             svm,
@@ -173,6 +186,24 @@ impl TestEnv {
             .airdrop(&user.pubkey(), ACTOR_LAMPORTS)
             .expect("new user airdrop");
         user
+    }
+
+    /// Deploys a program at the wallet's own address - what a wallet does with
+    /// `allocate` + `assign` + a deploy: the account becomes executable, owned by the
+    /// upgradeable loader, with its ProgramData at the canonical PDA (the ELF is the
+    /// Sale artifact; any program would do). The runtime refuses any lamport change
+    /// on an executable account.
+    pub fn make_executable(&mut self, address: &Pubkey) {
+        let elf = read_fresh_program_artifact(SALE_SO_PATH, SALE_CRATE_DIR);
+        self.svm
+            .add_program(*address, &elf)
+            .expect("add_program(executable wallet)");
+        assert!(
+            self.svm
+                .get_account(address)
+                .is_some_and(|account| account.executable),
+            "the wallet is executable"
+        );
     }
 
     // ---------- Clock ----------

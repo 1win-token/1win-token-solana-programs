@@ -20,8 +20,9 @@ custom-heap = []
 custom-panic = []
 
 [dependencies]
-# init-if-needed: only for the refund recipient's ATA - the user may have closed
-# the account; the ATA address is deterministic and no state is re-initialized.
+# init-if-needed: only for the ATA of a signer receiving its own payout (`claim`,
+# `withdraw_proceeds`, `sweep_*`) - the account may have been closed; the ATA
+# address is deterministic and no state is re-initialized.
 anchor-lang = { version = "1.0.2", features = ["event-cpi", "init-if-needed"] }
 # Classic SPL Token (NOT token_interface / Token-2022 - forbidden by the spec).
 anchor-spl = "1.0.2"

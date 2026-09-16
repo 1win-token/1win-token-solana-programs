@@ -100,16 +100,23 @@ The Operator refunds a specific deposit: `refund(index)`, where the contributing
 wallet is passed as an account (a deposit is bound to a wallet and an index through
 its seeds) and `index` is the number of the purchase being refunded.
 
-**What changes:** the USDC moves from the USDC vault **to the contribution's
-original wallet**, the Deposit account is closed (its rent goes back to the user),
-and aggregate.net and pool.total decrease.
+**What changes:** the USDC moves from the USDC vault **into a fresh USDC account
+that the refund creates for this deposit and that belongs to the contribution's
+original wallet** (the refund account), the Deposit account is closed into that same
+account (its rent goes back to the user with the USDC), and aggregate.net and
+pool.total decrease.
 
 **The key points:**
 - The amount and the recipient are taken **from the Deposit itself**, not from the
-  arguments.
+  arguments; the destination is the deposit's own program-derived account, so the
+  Operator decides only whether to refund, never where.
 - A refund is possible **only until the pool is fixed** (`!pool_fixed`).
-- If the wallet has no USDC account (the user closed it), the program creates its
-  ATA in the same instruction (paid for by the project) - a refund cannot get stuck.
+- The refund depends on nothing the wallet holds: it does not use the wallet's ATA
+  (whose SPL authority the wallet can hand to another key, which can be closed, or
+  frozen by the issuer) and does not touch the wallet account itself. The new
+  account is created inside the refund, paid for by the project - a refund cannot
+  get stuck. The wallet then moves the USDC or closes the account at will; the
+  account's address is derived from the wallet and the purchase index.
 - The aggregate is not closed even at net = 0 - protection against address reuse
   (revival).
 
@@ -440,6 +447,7 @@ than the planned schedule (~2 weeks) and exist only so that a typo of the "start
 | A purchase outside Sale / while paused / outside the limits / from the Blacklist / after fixation | Revert |
 | A purchase (or aggregate creation) from a program wallet - a multisig, custody, a smart wallet | `WalletNotOnCurve` revert - only a wallet with a private key of its own may take part |
 | A participant hands its account over to a third-party program to escape the ban, the limits and the refund | It does not help: the lists and `refund` treat the wallet as an address (an instruction argument, or an account bound by seeds) and never read the account's owner. The ban, the individual limits and the refund still apply to it |
+| A participant tries to block a forced refund through its destination: closes its USDC ATA, hands the ATA's SPL authority to another key, gets the ATA frozen, pre-funds the refund account's address, or turns the wallet into an executable program account | It does not help: `refund` creates a fresh account at a program-derived address that only the program can create, sends the USDC and the deposit's rent there, and neither reads nor writes the wallet's existing accounts or the wallet itself. A pre-funded address is completed to the token account; a substituted address is rejected (`ConstraintSeeds`) |
 | A purchase from a Graylisted wallet with an amount outside its `min`/`max` | A `BelowMin` / `AboveMax` revert (the individual limits replace the global ones) |
 | A purchase from a Graylisted wallet whose total contribution exceeds `max_total` | A `WalletTotalExceeded` revert (`contribution + amount > max_total`) |
 | An attempt to bypass the Graylist / `max_total` by not passing the Graylist slot | Impossible: the slot is mandatory and bound by seeds (fail-closed) |
@@ -459,7 +467,7 @@ than the planned schedule (~2 weeks) and exist only so that a typo of the "start
 | Withdrawing more than the proceeds | Impossible: `withdraw_proceeds` moves the whole `proceeds_vault` balance and closes it; at activation exactly the proceeds were placed into that vault and the rounding margin was withheld in a separate `refund_vault` |
 | A compromised Operator: mass blacklisting | Griefing rather than theft - only purchasing is blocked and it is reversible with `blacklist_remove`; Owner rotates the Operator |
 | A compromised Admin or a mistake: overly tight Graylist limits | Griefing rather than theft - the wallet's purchases are blocked; Admin is a multisig (a lower risk); it is reversible with `graylist_remove`; Owner rotates the Admin |
-| A compromised Operator: mass refunds | The funds go only to the contributors' original wallets - sabotage of the collection, not theft |
+| A compromised Operator: mass refunds | The funds go only into accounts owned by the contributors' original wallets (the deposits' refund accounts) - sabotage of the collection, not theft; each refund also costs the project the new account's rent |
 | An attempt to close SaleState / the vaults / a Blacklist / a Graylist through a batch | A revert - the discriminator and PDA checks (a batch closes only Deposit/WalletAggregate) |
 | Owner nominated to a mistaken address (a typo, a foreign or a non-existent key) | Control is not lost: `propose_owner` only records the candidate and `accept_owner` requires its signature. The rights stay with the sitting Owner, and the nomination is replayed with a repeated `propose_owner` or withdrawn with `cancel_owner_proposal` |
 | `accept_owner` with no nomination, or from a foreign key | A `NoPendingOwner` / `Unauthorized` revert - only the nominated candidate may step into the role |

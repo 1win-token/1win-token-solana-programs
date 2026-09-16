@@ -203,9 +203,11 @@
   "you buy no more", a refund means "return the money".
 - **TS-20.** A risky deposit is refunded individually, per purchase: the deposit
   being refunded is identified by the contributing wallet (passed as an account) and
-  the purchase's index; the USDC goes strictly back to the original wallet, and the
-  wallet's total contribution and the pool's size decrease. The same deposit cannot
-  be refunded twice.
+  the purchase's index; the USDC goes strictly into an account controlled by the
+  original wallet - a fresh account the refund creates for that deposit, so that
+  nothing the participant holds can block the return - and the wallet's total
+  contribution and the pool's size decrease. The same deposit cannot be refunded
+  twice.
 - **TS-21.** Refunds are available **only until the pool is fixed**; afterwards the
   pool and the allocations are final.
 - **TS-22.** Refunding all of a wallet's deposits zeroes its contribution - the
@@ -284,7 +286,9 @@
   storage are returned to their user owners: a wallet's contribution record by the
   claim; everything the claim did not close (the deposit records and the
   contribution records of wallets that never claimed) after the deadline. The
-  closing is performed by the Operator.
+  closing is performed by the Operator. A deposit record refunded before the pool is
+  fixed is closed by the refund itself, and its storage reserve reaches the user
+  through the account that received the refund.
 
 ---
 

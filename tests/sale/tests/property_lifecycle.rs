@@ -19,9 +19,10 @@ use sale::errors::SaleError;
 use sale_test_common::{
     activate_claim_ix, aggregate_pda, claim_ix, close_aggregates_ix, close_deposits_ix,
     custom_error_code, deposit_pda, deposit_vault_pda, init_aggregate_ix, initialize_ix,
-    owner_token_ata, proceeds_vault_pda, purchase_ix, refund_ix, refund_vault_pda,
-    sweep_deposit_vault_ix, sweep_refund_vault_ix, sweep_token_vault_ix, token_vault_pda,
-    wallet_token_ata, wallet_usdc_ata, withdraw_proceeds_ix, TestEnv, WIN_DECIMALS,
+    owner_token_ata, proceeds_vault_pda, purchase_ix, refund_account_pda, refund_ix,
+    refund_vault_pda, sweep_deposit_vault_ix, sweep_refund_vault_ix, sweep_token_vault_ix,
+    token_vault_pda, wallet_token_ata, wallet_usdc_ata, withdraw_proceeds_ix, TestEnv,
+    WIN_DECIMALS,
 };
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
@@ -585,8 +586,14 @@ fn run_scenario(seed: u64, profile: Profile) {
     let owner_tokens = u128::from(bal0(&env, &owner_token_ata(&owner.pubkey(), &win)));
     let mut users_usdc: u128 = 0;
     let mut users_tokens: u128 = 0;
-    for w in &wallets {
+    for (wi, w) in wallets.iter().enumerate() {
         users_usdc += u128::from(bal0(&env, &wallet_usdc_ata(&w.pubkey(), &usdc)));
+        // The AML refunds sit in the per-deposit refund accounts, not in the ATA.
+        for (di, &refunded) in plan.refund[wi].iter().enumerate() {
+            if refunded {
+                users_usdc += u128::from(bal0(&env, &refund_account_pda(&w.pubkey(), di as u64)));
+            }
+        }
         users_tokens += u128::from(bal0(&env, &wallet_token_ata(&w.pubkey(), &win)));
     }
     assert_eq!(
@@ -697,9 +704,9 @@ fn lifecycle_full_refund_pool_zero() {
         )
         .expect("refund");
         assert_eq!(
-            env.token_balance(&wallet_usdc_ata(&u.pubkey(), &usdc)),
+            env.token_balance(&refund_account_pda(&u.pubkey(), 0)),
             DEP,
-            "the AML refund returned the whole deposit"
+            "the AML refund returned the whole deposit into the wallet's refund account"
         );
     }
     assert_eq!(
@@ -779,7 +786,7 @@ fn lifecycle_full_refund_pool_zero() {
             "the aggregate is closed"
         );
         assert_eq!(
-            env.token_balance(&wallet_usdc_ata(&u.pubkey(), &usdc)),
+            env.token_balance(&refund_account_pda(&u.pubkey(), 0)),
             DEP,
             "the wallet kept all of its money"
         );

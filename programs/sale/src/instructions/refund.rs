@@ -1,14 +1,15 @@
 //! `refund(index)` - the Operator refunds a single deposit before the pool is
-//! fixed.
+//! fixed, into a fresh USDC account the wallet owns.
 
 use anchor_lang::prelude::*;
-use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::errors::SaleError;
 use crate::events::Refunded;
 use crate::phase::Phase;
-use crate::seeds::{AGGREGATE_SEED, DEPOSIT_SEED, SALE_STATE_SEED, VAULT_AUTHORITY_SEED};
+use crate::seeds::{
+    AGGREGATE_SEED, DEPOSIT_SEED, REFUND_ACCOUNT_SEED, SALE_STATE_SEED, VAULT_AUTHORITY_SEED,
+};
 use crate::state::{Deposit, SaleState, WalletAggregate};
 use crate::vault::transfer_from_vault;
 
@@ -29,15 +30,15 @@ pub struct Refund<'info> {
     #[account(mut)]
     pub operator: Signer<'info>,
 
-    /// CHECK: the address is bound by the deposit and aggregate seeds plus
-    /// `has_one = wallet`; the wallet's owning program is irrelevant - it only
-    /// receives the rent and owns its own USDC ATA.
-    #[account(mut)]
+    /// CHECK: an address only - bound by the deposit and aggregate seeds plus
+    /// `has_one = wallet`; nothing of the account itself is read or written, so
+    /// no state of the wallet can affect the refund (§6.4).
     pub wallet: UncheckedAccount<'info>,
 
+    /// Closed into the refund account: its rent follows the USDC (§9.8).
     #[account(
         mut,
-        close = wallet,
+        close = refund_account,
         seeds = [DEPOSIT_SEED, wallet.key().as_ref(), index.to_le_bytes().as_ref()],
         bump,
         has_one = wallet,
@@ -51,13 +52,18 @@ pub struct Refund<'info> {
     )]
     pub aggregate: Box<Account<'info, WalletAggregate>>,
 
+    /// A fresh USDC account for this deposit's refund, created here with the
+    /// wallet as its SPL authority; the deposit's rent lands here too (§9.8).
+    /// Nothing the wallet or the issuer controls exists before the instruction.
     #[account(
-        init_if_needed,
+        init,
         payer = operator,
-        associated_token::mint = usdc_mint,
-        associated_token::authority = wallet,
+        seeds = [REFUND_ACCOUNT_SEED, wallet.key().as_ref(), index.to_le_bytes().as_ref()],
+        bump,
+        token::mint = usdc_mint,
+        token::authority = wallet,
     )]
-    pub wallet_usdc_ata: Box<Account<'info, TokenAccount>>,
+    pub refund_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut, address = sale_state.deposit_vault)]
     pub deposit_vault: Box<Account<'info, TokenAccount>>,
@@ -71,7 +77,6 @@ pub struct Refund<'info> {
     pub usdc_mint: Box<Account<'info, Mint>>,
 
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
@@ -110,7 +115,7 @@ pub fn refund(ctx: Context<Refund>, index: u64) -> Result<()> {
     transfer_from_vault(
         &ctx.accounts.token_program.to_account_info(),
         &ctx.accounts.deposit_vault.to_account_info(),
-        &ctx.accounts.wallet_usdc_ata.to_account_info(),
+        &ctx.accounts.refund_account.to_account_info(),
         &ctx.accounts.vault_authority.to_account_info(),
         vault_authority_bump,
         amount,

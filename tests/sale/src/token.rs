@@ -13,7 +13,7 @@ use solana_keypair::Keypair;
 use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use spl_token_interface::state::{Account as TokenAccount, Mint};
+use spl_token_interface::state::{Account as TokenAccount, AccountState, Mint};
 
 impl TestEnv {
     /// Creates the ATA of `wallet` for `mint` (the payer is the environment's `payer`)
@@ -54,7 +54,37 @@ impl TestEnv {
     /// decimals != 6, a token mint with decimals != 9.
     pub fn create_mint_for_test(&mut self, decimals: u8) -> Pubkey {
         let payer = self.payer.insecure_clone();
-        create_mint(&mut self.svm, &payer, decimals)
+        create_mint(&mut self.svm, &payer, decimals, None)
+    }
+
+    /// Freezes a token account of `mint` (the freeze authority is the environment's
+    /// `payer`, which only a mint created with one holds - see
+    /// [`TestEnv::with_usdc_freeze_authority`]).
+    pub fn freeze_account(&mut self, token_account: &Pubkey, mint: &Pubkey) {
+        let payer = self.payer.insecure_clone();
+        let ix = spl_token_interface::instruction::freeze_account(
+            &spl_token_interface::id(),
+            token_account,
+            mint,
+            &payer.pubkey(),
+            &[],
+        )
+        .expect("the freeze_account instruction");
+        self.send_ixs(&[ix], &payer.pubkey(), &[&payer])
+            .expect("freeze_account");
+    }
+
+    /// Whether the token account is frozen. Panics if the account does not exist or
+    /// does not parse as an SPL token account (fail-closed).
+    pub fn token_account_frozen(&self, token_account: &Pubkey) -> bool {
+        let account = self
+            .svm
+            .get_account(token_account)
+            .unwrap_or_else(|| panic!("token account {token_account} does not exist"));
+        TokenAccount::unpack(&account.data)
+            .unwrap_or_else(|e| panic!("{token_account} is not an SPL token account: {e}"))
+            .state
+            == AccountState::Frozen
     }
 
     /// Forges the balance of an SPL token account (for the `DepositVaultUnderfunded`
@@ -132,12 +162,17 @@ impl TestEnv {
 }
 
 /// Creates an SPL mint with the given decimals using genuine instructions
-/// (`create_account` + `initialize_mint2`); the mint authority is `authority` and
-/// there is no freeze authority.
+/// (`create_account` + `initialize_mint2`); the mint authority is `authority`, the
+/// freeze authority is `freeze_authority` (none by default - see the constructors).
 ///
 /// A free function rather than a method: it is called from the `TestEnv`
 /// constructor before the struct is assembled.
-pub(crate) fn create_mint(svm: &mut LiteSVM, authority: &Keypair, decimals: u8) -> Pubkey {
+pub(crate) fn create_mint(
+    svm: &mut LiteSVM,
+    authority: &Keypair,
+    decimals: u8,
+    freeze_authority: Option<&Pubkey>,
+) -> Pubkey {
     let mint = Keypair::new();
     let rent = svm.minimum_balance_for_rent_exemption(Mint::LEN);
     let create_ix = solana_system_interface::instruction::create_account(
@@ -151,7 +186,7 @@ pub(crate) fn create_mint(svm: &mut LiteSVM, authority: &Keypair, decimals: u8) 
         &spl_token_interface::id(),
         &mint.pubkey(),
         &authority.pubkey(),
-        None,
+        freeze_authority,
         decimals,
     )
     .expect("the initialize_mint2 instruction");
