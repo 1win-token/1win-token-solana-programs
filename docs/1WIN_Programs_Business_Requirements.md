@@ -129,7 +129,7 @@
 | Maximum purchase | 250,000 USDC | Admin | Before the Sale phase starts |
 | Sale start date | - | Admin | Before the start; no further out than 90 days from the edit |
 | Sale duration | ~2 weeks | Admin | Only before the start; afterwards the schedule is immutable; at most 30 days |
-| Claim start date | - | Admin | At initialization; editable until the pool is fixed; later than the sale's end and no more than +30 days from it |
+| Claim start date | - | Admin | At initialization; editable until the pool is fixed; later than the sale's end and than the moment of the edit, and no more than +30 days from the later of the two |
 | Claim duration | 12 months | Admin | At initialization; editable until the pool is fixed; at most 12 months |
 
   The values above are the reference configuration this document works with; each of
@@ -229,8 +229,10 @@
   only after the pool is fixed - before that claiming is unavailable even if the
   start date has already arrived.
 - **TS-27.** The Claim start date is set at initialization together with the Sale
-  schedule: after the Sale ends and no later than 30 days after it. It is editable
-  until the pool is fixed.
+  schedule and is editable until the pool is fixed. It always lies ahead: after the
+  Sale ends and after the edit itself, and no later than 30 days after the later of
+  the two - so a valid start can be scheduled at any time before the pool is fixed,
+  and a late activation is recovered by moving the start forward.
 - **TS-28.** The Claim window is always full: the deadline = the start date plus the
   duration; moving the start date moves the beginning but does not shorten the
   window.

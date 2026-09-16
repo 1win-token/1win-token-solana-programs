@@ -81,7 +81,7 @@ pub fn initialize(
     let now = Clock::get()?.unix_timestamp;
 
     SaleState::validate_sale_window(now, sale_start_date, sale_end_date)?;
-    SaleState::validate_claim_start(sale_end_date, claim_start_date)?;
+    SaleState::validate_claim_start(now, sale_end_date, claim_start_date)?;
     SaleState::validate_claim_duration(claim_duration)?;
 
     require_keys_neq!(

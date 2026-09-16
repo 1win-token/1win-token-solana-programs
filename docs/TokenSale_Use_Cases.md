@@ -160,8 +160,8 @@ is fixed; the activation does not take it as an argument.
 Claim (participants would get a shortened window) or ClaimClosed (there would be no
 window at all, while withdrawal and vault closing would already be open to Owner).
 If the fixation is late, Admin moves `claim_start` forward through
-`set_claim_schedule` (available while the pool is not fixed, within
-`end_date + 30 days`) and activates again.
+`set_claim_schedule` (available while the pool is not fixed, to any moment within
+30 days of the edit) and activates again; the way out does not expire.
 
 **The coverage gate:** the token vault must already hold enough $1WIN (Owner mints
 in advance, or the mint and the activation go in one transaction). Otherwise the
@@ -417,6 +417,14 @@ than the planned schedule (~2 weeks) and exist only so that a typo of the "start
 (min/max) obey the same guard - editable only in PreSale, and after the start
 `set_tx_limits` reverts with `SaleAlreadyStarted`.
 
+The Claim schedule (`claim_start`, the duration) is the one parameter that stays
+editable after the sale starts - until the pool is fixed (`set_claim_schedule`,
+`!pool_fixed`). The start must lie ahead of both the sale's end and the edit itself,
+and no more than 30 days after the later of the two (`ClaimStartInPast` /
+`ClaimStartTooFar`); the duration is at most 12 months. Because the ceiling follows
+the edit rather than the sale's end, a late activation is always recoverable: Admin
+moves the start forward and activates (§4).
+
 ### 8.3. Changing the roles
 
 - Owner → a new Owner: **two steps**. The sitting Owner calls `propose_owner(new)` -
@@ -457,7 +465,8 @@ than the planned schedule (~2 weeks) and exist only so that a typo of the "start
 | Activating Claim with an underfunded token vault | A `VaultNotFunded` revert |
 | Revoking the right to mint with an underfunded token vault | It does not go through: `assert_funded` in the same transaction requires `balance ≥ the sale's emission` and fails it with `VaultNotFunded` before the revocation. The guarantee rests on the transaction's composition: the assembler must include the check (the pre-flight procedure), and the program cannot demand it |
 | `assert_funded` during Claim on a fully covered sale | A `VaultNotFunded` revert - expected behaviour rather than a defect: the vault is already being spent by claims and the program does not account for what was released. The check is meant for the window before the first payouts |
-| The Claim activation is late: `claim_start` has already arrived (or the deadline has passed) | A `ClaimStartInPast` revert - the claim window cannot open retroactively. The way out: Admin moves `claim_start` forward (`set_claim_schedule`) and activates again |
+| The Claim activation is late: `claim_start` has already arrived (or the deadline has passed), even long after the sale's end | A `ClaimStartInPast` revert - the claim window cannot open retroactively. The way out: Admin moves `claim_start` forward (`set_claim_schedule`: later than now, within 30 days of the edit) and activates again; the window is handed out at full length |
+| `set_claim_schedule` with a start that has already passed, or more than 30 days after the later of the sale's end and the edit | A `ClaimStartInPast` / `ClaimStartTooFar` revert - the setter and the activation agree on one predicate, so a start the activation would reject never reaches the state |
 | A repeated claim | A revert - the aggregate is closed (`AccountNotInitialized`) |
 | Changing the schedule or the transaction limits after the sale starts | A `SaleAlreadyStarted` revert - frozen from the start |
 | A typo in the sale schedule: a start beyond 90 days or an intake window longer than 30 days | A `StartDateTooFar` / `SaleDurationTooLong` revert - both on `initialize` and on `set_sale_schedule` |

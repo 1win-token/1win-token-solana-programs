@@ -4,6 +4,8 @@
 //!
 //! The phase and role gates of these setters are covered in phase_matrix.rs /
 //! role_matrix.rs; here it is value validation inside the permitted phase (PreSale).
+//! The `set_claim_schedule` pass also runs in SaleEnded, where both bounds on
+//! `claim_start_date` follow `now` rather than the sale's end.
 
 use anchor_lang::error::ERROR_CODE_OFFSET;
 use sale::errors::SaleError;
@@ -464,5 +466,121 @@ fn set_claim_schedule_positive_and_negatives() {
     assert_eq!(
         s.claim_duration, valid_dur,
         "claim_duration is the one left by the positive case"
+    );
+}
+
+// ===================================================================
+// set_claim_schedule in SaleEnded: both bounds follow now. After the sale's end the
+// anchor is the moment of the edit, so a start behind now is rejected even though it
+// is after sale_end_date, and the ceiling is now + 30d rather than sale_end_date + 30d
+// - a sale left past the original ceiling can still be rescheduled.
+// ===================================================================
+
+#[test]
+fn set_claim_schedule_in_sale_ended_rejects_start_not_ahead_of_now() {
+    let (mut env, p, admin) = setup();
+    env.warp_to(p.sale_end_date + 10);
+    let before = env.sale_state();
+
+    // NEGATIVE: after the sale's end, but already behind now.
+    let r = send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), p.sale_end_date + 1, p.claim_duration),
+        &admin,
+    );
+    assert_eq!(
+        custom_error_code(&r),
+        Some(err(SaleError::ClaimStartInPast)),
+        "a start behind now → ClaimStartInPast: {r:?}"
+    );
+
+    // NEGATIVE: exactly now (the bound is strict).
+    env.expire_blockhash();
+    let now = env.now();
+    let r = send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), now, p.claim_duration),
+        &admin,
+    );
+    assert_eq!(
+        custom_error_code(&r),
+        Some(err(SaleError::ClaimStartInPast)),
+        "a start == now → ClaimStartInPast: {r:?}"
+    );
+    assert_eq!(
+        env.sale_state().claim_start_date,
+        before.claim_start_date,
+        "claim_start_date is untouched by the negatives"
+    );
+
+    // POSITIVE: one second ahead of now is enough.
+    env.expire_blockhash();
+    send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), now + 1, p.claim_duration),
+        &admin,
+    )
+    .expect("a start one second ahead of now passes");
+    assert_eq!(
+        env.sale_state().claim_start_date,
+        now + 1,
+        "claim_start_date was written"
+    );
+}
+
+#[test]
+fn set_claim_schedule_in_sale_ended_ceiling_follows_now() {
+    let (mut env, p, admin) = setup();
+    // Past the original ceiling: every start the old rule allowed is behind now.
+    env.warp_to(p.sale_end_date + MAX_CLAIM_START_DELAY + 1);
+    let now = env.now();
+
+    // NEGATIVE: the old ceiling itself is in the past.
+    let r = send(
+        &mut env,
+        set_claim_schedule_ix(
+            admin.pubkey(),
+            p.sale_end_date + MAX_CLAIM_START_DELAY,
+            p.claim_duration,
+        ),
+        &admin,
+    );
+    assert_eq!(
+        custom_error_code(&r),
+        Some(err(SaleError::ClaimStartInPast)),
+        "sale_end_date + 30d behind now → ClaimStartInPast: {r:?}"
+    );
+
+    // POSITIVE: the ceiling is measured from now.
+    env.expire_blockhash();
+    let at_ceiling = now + MAX_CLAIM_START_DELAY;
+    send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), at_ceiling, p.claim_duration),
+        &admin,
+    )
+    .expect("now + 30d passes");
+    assert_eq!(
+        env.sale_state().claim_start_date,
+        at_ceiling,
+        "claim_start_date was written at the ceiling"
+    );
+
+    // NEGATIVE: one second past it.
+    env.expire_blockhash();
+    let r = send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), at_ceiling + 1, p.claim_duration),
+        &admin,
+    );
+    assert_eq!(
+        custom_error_code(&r),
+        Some(err(SaleError::ClaimStartTooFar)),
+        "now + 30d + 1 → ClaimStartTooFar: {r:?}"
+    );
+    assert_eq!(
+        env.sale_state().claim_start_date,
+        at_ceiling,
+        "claim_start_date is the one left by the positive case"
     );
 }

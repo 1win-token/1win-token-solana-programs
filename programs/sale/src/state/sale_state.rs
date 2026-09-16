@@ -126,12 +126,14 @@ impl SaleState {
         Ok(())
     }
 
-    pub fn validate_claim_start(sale_end_date: i64, claim_start_date: i64) -> Result<()> {
-        require!(
-            sale_end_date < claim_start_date,
-            SaleError::ClaimStartInPast
-        );
-        let max_claim_start = sale_end_date
+    /// Both bounds are measured from the later of the sale's end and `now`:
+    /// before the sale ends that is `sale_end_date`, after it the moment of the
+    /// edit - so a future start can always be scheduled while the pool is not
+    /// fixed, and `activate_claim` (`now < claim_start_date`) is never locked out.
+    pub fn validate_claim_start(now: i64, sale_end_date: i64, claim_start_date: i64) -> Result<()> {
+        let anchor = sale_end_date.max(now);
+        require!(anchor < claim_start_date, SaleError::ClaimStartInPast);
+        let max_claim_start = anchor
             .checked_add(MAX_CLAIM_START_DELAY)
             .ok_or(SaleError::MathOverflow)?;
         require!(

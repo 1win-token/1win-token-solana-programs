@@ -21,9 +21,9 @@ pub enum SaleError {
     SaleAlreadyStarted,
     #[msg("Pool is already fixed; the Claim schedule can no longer change")]
     PoolAlreadyFixed,
-    #[msg("claim_start_date must be strictly after sale_end_date, and still ahead of now when the pool is fixed")]
+    #[msg("claim_start_date must lie ahead of both sale_end_date and now")]
     ClaimStartInPast,
-    #[msg("claim_start_date exceeds sale_end_date + MAX_CLAIM_START_DELAY")]
+    #[msg("claim_start_date exceeds max(sale_end_date, now) + MAX_CLAIM_START_DELAY")]
     ClaimStartTooFar,
     #[msg("Instruction is not allowed in the current phase")]
     WrongPhase,

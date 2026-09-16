@@ -74,7 +74,7 @@ pub fn set_sale_schedule(
 
     state.require_pre_sale()?;
     SaleState::validate_sale_window(now, sale_start_date, sale_end_date)?;
-    SaleState::validate_claim_start(sale_end_date, state.claim_start_date)?;
+    SaleState::validate_claim_start(now, sale_end_date, state.claim_start_date)?;
 
     state.sale_start_date = sale_start_date;
     state.sale_end_date = sale_end_date;
@@ -102,7 +102,7 @@ pub fn set_claim_schedule(
         SaleError::WrongPhase
     );
     require!(!state.pool_fixed, SaleError::PoolAlreadyFixed);
-    SaleState::validate_claim_start(state.sale_end_date, claim_start_date)?;
+    SaleState::validate_claim_start(now, state.sale_end_date, claim_start_date)?;
     SaleState::validate_claim_duration(claim_duration)?;
 
     state.claim_start_date = claim_start_date;

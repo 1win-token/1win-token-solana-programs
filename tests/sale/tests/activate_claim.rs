@@ -18,14 +18,18 @@
 //!   (`DepositVaultUnderfunded`).
 //! - I8 (§3): the activation happens exactly once.
 //! - The claim window: fixation is possible only while `now < claim_start_date`,
-//!   otherwise the window collapses (`ClaimStartInPast`).
+//!   otherwise the window collapses (`ClaimStartInPast`); a missed window is
+//!   recovered by rescheduling, since the setter's ceiling follows the edit rather
+//!   than the sale's end.
 
 use anchor_lang::error::ERROR_CODE_OFFSET;
 use sale::errors::SaleError;
+use sale::state::MAX_CLAIM_START_DELAY;
 use sale_test_common::{
     activate_claim_ix, claim_ix, custom_error_code, deposit_vault_pda,
     expected::DEFAULT_PRICE_USDC, init_aggregate_ix, initialize_ix, proceeds_vault_pda,
-    purchase_ix, refund_vault_pda, token_vault_pda, wallet_token_ata, InitParams, TestEnv,
+    purchase_ix, refund_vault_pda, set_claim_schedule_ix, sweep_token_vault_ix, token_vault_pda,
+    wallet_token_ata, InitParams, TestEnv,
 };
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -533,7 +537,9 @@ fn activate_undersubscribed_with_refund_vault_rejected() {
 // over: if by then now has moved past claim_start_date, setting pool_fixed would
 // make the phase read as Claim already (part of the window is lost) or ClaimClosed
 // (there is no window at all, yet sweep_* is already open). The check lives exactly
-// at the moment of fixation.
+// at the moment of fixation. A missed window is recovered by rescheduling: the
+// setter's ceiling follows the edit rather than the sale's end, so the way out never
+// expires.
 // ===================================================================
 
 /// The boundary: exactly `now == claim_start_date` is already too late (a strict `<`
@@ -645,4 +651,114 @@ fn activate_just_before_claim_start_date_keeps_full_window() {
         UNDER_TOKENS_PER_WALLET,
         "A received its undersubscribed share"
     );
+}
+
+/// The way out of a missed window never expires: past the original ceiling
+/// (`sale_end_date + MAX_CLAIM_START_DELAY`) the setter still takes a start within
+/// 30 days of `now`, the activation then passes, and the window it opens is
+/// full-length - the sweep stays closed until exactly `new_start + duration`.
+#[test]
+fn activate_after_original_ceiling_recovers_by_rescheduling() {
+    let mut env = TestEnv::new();
+    let usdc = env.usdc_mint;
+    let win = env.win_mint;
+    let admin = env.actors.admin.insecure_clone();
+    let owner = env.actors.owner.insecure_clone();
+    let a = env.actors.users[0].insecure_clone();
+    let b = env.actors.users[1].insecure_clone();
+    let p = params_with_emission(&env, EMISSION);
+
+    build_pool_in_sale(&mut env, &p, &[(&a, UNDER_DEP), (&b, UNDER_DEP)]);
+    // Past the original ceiling: the stored claim_start_date is behind now.
+    env.warp_to(p.sale_end_date + MAX_CLAIM_START_DELAY + 1);
+    fund_token_vault(&mut env, UNDER_DIST);
+
+    // NEGATIVE: the stale schedule cannot be activated.
+    env.expire_blockhash();
+    let r = send(
+        &mut env,
+        activate_claim_ix(admin.pubkey(), usdc, None),
+        &admin,
+    );
+    assert_eq!(
+        custom(&r),
+        Some(err(SaleError::ClaimStartInPast)),
+        "activation with a stale claim_start_date → ClaimStartInPast: {r:?}"
+    );
+    assert!(!env.sale_state().pool_fixed, "the pool is not fixed");
+
+    // The reschedule is bounded by now, not by the sale's end.
+    let new_start = env.now() + 1_000;
+    env.expire_blockhash();
+    send(
+        &mut env,
+        set_claim_schedule_ix(admin.pubkey(), new_start, p.claim_duration),
+        &admin,
+    )
+    .expect("set_claim_schedule past the original ceiling");
+    assert_eq!(env.sale_state().claim_start_date, new_start);
+
+    // POSITIVE: the same activation now passes.
+    env.expire_blockhash();
+    send(
+        &mut env,
+        activate_claim_ix(admin.pubkey(), usdc, None),
+        &admin,
+    )
+    .expect("activation after the reschedule");
+    assert!(env.sale_state().pool_fixed, "the pool is fixed");
+
+    // After fixation but before new_start it is still SaleEnded.
+    env.expire_blockhash();
+    let r = send(&mut env, claim_ix(a.pubkey(), usdc, win, false), &a);
+    assert_eq!(
+        custom(&r),
+        Some(err(SaleError::WrongPhase)),
+        "a claim before the rescheduled start → WrongPhase: {r:?}"
+    );
+
+    // From new_start the window is open.
+    env.warp_to(new_start);
+    env.expire_blockhash();
+    send(&mut env, claim_ix(a.pubkey(), usdc, win, false), &a)
+        .expect("a claim from the rescheduled start");
+    assert_eq!(
+        env.token_balance(&wallet_token_ata(&a.pubkey(), &win)),
+        UNDER_TOKENS_PER_WALLET,
+        "A received its undersubscribed share"
+    );
+
+    // One second before the deadline the window is still open and nothing can be
+    // swept.
+    let deadline = new_start + p.claim_duration;
+    env.warp_to(deadline - 1);
+    env.expire_blockhash();
+    let r = send(
+        &mut env,
+        sweep_token_vault_ix(owner.pubkey(), win, owner.pubkey()),
+        &owner,
+    );
+    assert_eq!(
+        custom(&r),
+        Some(err(SaleError::DeadlineNotPassed)),
+        "a sweep inside the rescheduled window → DeadlineNotPassed: {r:?}"
+    );
+    env.expire_blockhash();
+    send(&mut env, claim_ix(b.pubkey(), usdc, win, false), &b)
+        .expect("a claim one second before the deadline");
+    assert_eq!(
+        env.token_balance(&wallet_token_ata(&b.pubkey(), &win)),
+        UNDER_TOKENS_PER_WALLET,
+        "B received its undersubscribed share"
+    );
+
+    // ClaimClosed arrives exactly at new_start + duration: the window was full-length.
+    env.warp_to(deadline);
+    env.expire_blockhash();
+    send(
+        &mut env,
+        sweep_token_vault_ix(owner.pubkey(), win, owner.pubkey()),
+        &owner,
+    )
+    .expect("a sweep at the deadline");
 }

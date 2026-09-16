@@ -212,7 +212,7 @@ deadline (5.9).
 | Maximum purchase | 250,000 USDC | Admin (before the Sale phase starts). A per-purchase limit; the number of purchases from a wallet is unlimited |
 | Sale start date (`start_date`) | - | Admin (before the start); `now < start_date ≤ now + 90 days` (`MAX_SALE_START_DELAY`) - protection against a mistakenly distant start |
 | Sale end date (`end_date`) | - | Admin (only before the Sale phase starts; afterwards the sale's schedule is immutable); `end_date − start_date ≤ 30 days` (`MAX_SALE_DURATION`) - protection against a mistakenly long intake window |
-| Claim start date (`claim_start`) | - | Admin (until the pool is fixed, `!pool_fixed`); `end_date (Sale) < claim_start ≤ end_date + 30 days` (`MAX_CLAIM_START_DELAY`) - protection against a mistakenly distant schedule; at the moment the pool is fixed `claim_start` must still lie ahead (`now < claim_start`, §5.6) |
+| Claim start date (`claim_start`) | - | Admin (until the pool is fixed, `!pool_fixed`); `max(end_date, now) < claim_start ≤ max(end_date, now) + 30 days` (`MAX_CLAIM_START_DELAY`), `now` being the moment of the edit - protection against a start already in the past and against a mistakenly distant schedule; at the moment the pool is fixed `claim_start` must still lie ahead (`now < claim_start`, §5.6) |
 | Claim duration | 12 months | Admin (until the pool is fixed, `!pool_fixed`; at most 12 months, `MAX_CLAIM_DURATION`) |
 
 **The soft cap is a derived quantity.** Two parameters are stored - the price and
@@ -232,10 +232,13 @@ as a safeguard against input error rather than as a business parameter.
 together with the Sale schedule and are editable until the pool is fixed
 (`!pool_fixed`). The Claim deadline (`claim_start + the duration`) is computed on
 demand and not stored as a field of its own. The bound
-`end_date < claim_start ≤ end_date + 30 days` is checked on every edit of
-`claim_start`, the duration or `end_date`: a shift of `end_date` that violates it
-reverts. Beyond that bound, fixing the pool requires `claim_start` to still lie
-ahead at the moment of the fixation itself (`now < claim_start`, §5.6).
+`max(end_date, now) < claim_start ≤ max(end_date, now) + 30 days` is checked on
+every edit of `claim_start`, the duration or `end_date`, with `now` the moment of
+that edit: a shift of `end_date` that violates it reverts, and so does a start that
+has already passed. Before the sale ends the anchor is `end_date`; after it, the
+moment of the edit - so a valid future start can be scheduled at any time while the
+pool is not fixed. On top of that, fixing the pool requires `claim_start` to still
+lie ahead at the moment of the fixation itself (`now < claim_start`, §5.6).
 
 **The price and the emission are immutable from the start of the Sale phase.** They
 are editable only before the Sale phase starts; from its beginning both parameters
@@ -274,7 +277,7 @@ Claim      : pool_fixed && claim_start ≤ now < deadline         - tokens are r
 ClaimClosed: pool_fixed && now ≥ deadline                       - the unclaimed funds are withdrawn to the project
 
 end_date    = the Sale phase's end date (a stored parameter, editable only before the start)
-claim_start = set at initialize, editable until the pool is fixed (§5.6); end_date < claim_start ≤ end_date + 30 days
+claim_start = set at initialize, editable until the pool is fixed (§5.6); max(end_date, now) < claim_start ≤ max(end_date, now) + 30 days at the moment of the edit
 deadline    = claim_start + the Claim duration - computed on demand, not stored
 ```
 
@@ -488,9 +491,9 @@ That is why no separate isolated vault for high-risk funds is needed: everything
 settled before the pool is fixed.
 
 "About a day" is an operational norm for closing compliance rather than a constraint
-of the program. The program's ceiling on `claim_start` (`the sale's end_date + 30
-days`, §5.1/§5.6) is a separate safeguard against a mistakenly distant schedule and
-is deliberately wider than this window.
+of the program. The program's ceiling on `claim_start` (30 days after the later of
+the sale's `end_date` and the edit, §5.1/§5.6) is a separate safeguard against a
+mistakenly distant schedule and is deliberately wider than this window.
 
 ### 5.6 Fixing the pool and activating Claim
 
@@ -540,12 +543,12 @@ the start of Claim.
    - The instruction also requires **the start of Claim to still lie ahead**
      (`now < claim_start`); otherwise the activation reverts (`ClaimStartInPast`). The
      Claim schedule is set before the sale while the fixation happens after the whole
-     sale, so the window is checked at the moment of the fixation itself: fixing the
-     pool at `claim_start` or later would give participants a shortened claim window
-     or none at all, while opening the withdrawal and the vault closing to Owner. If
-     the fixation is late, Admin first moves `claim_start` forward
-     (`set_claim_schedule`, available while the pool is not fixed, within
-     `end_date + 30 days`) and then activates.
+     sale, so the window is checked again at the moment of the fixation itself: fixing
+     the pool at `claim_start` or later would give participants a shortened claim
+     window or none at all, while opening the withdrawal and the vault closing to
+     Owner. If the fixation is late, Admin first moves `claim_start` forward
+     (`set_claim_schedule`, available while the pool is not fixed, to any moment
+     within 30 days of the edit) and then activates - the way out does not expire.
    - Fixing the pool is the only gate on Claim: while the pool is not fixed, payouts
      and refunds are unavailable (the phase availability is in §5.2).
    - Before the activation the claim instructions and `sweep_unclaimed` revert, and

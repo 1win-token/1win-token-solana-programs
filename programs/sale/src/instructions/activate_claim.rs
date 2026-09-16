@@ -89,6 +89,8 @@ pub fn activate_claim(ctx: Context<ActivateClaim>) -> Result<()> {
         SaleError::PoolAlreadyFixed
     );
 
+    // The setters enforce the same predicate at the moment of the edit; the pool
+    // is fixed later, so it is re-asserted against the real moment of the fix.
     require!(now < claim_start_date, SaleError::ClaimStartInPast);
 
     let oversubscribed = is_oversubscribed(pool, emission, price_usdc, TOKEN_UNITS)?;

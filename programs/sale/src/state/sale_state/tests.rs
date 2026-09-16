@@ -207,7 +207,7 @@ fn claim_start_date_order_boundaries() {
     ];
     for (claim_start_date, want) in cases {
         assert_eq!(
-            code(SaleState::validate_claim_start(END, claim_start_date)),
+            code(SaleState::validate_claim_start(NOW, END, claim_start_date)),
             want,
             "claim_start_date = {claim_start_date}"
         );
@@ -225,18 +225,72 @@ fn claim_start_date_delay_ceiling() {
     ];
     for (claim_start_date, want) in cases {
         assert_eq!(
-            code(SaleState::validate_claim_start(END, claim_start_date)),
+            code(SaleState::validate_claim_start(NOW, END, claim_start_date)),
             want,
             "claim_start_date = {claim_start_date}"
         );
     }
 }
 
-/// The i64 extremes: the ceiling addition returns an error rather than panics.
+/// At the sale's end itself the anchor is still the sale's end: the table matches
+/// the one measured before the sale.
 #[test]
-fn claim_start_date_extreme_is_error() {
+fn claim_start_date_anchor_is_sale_end_until_it_passes() {
+    let cases: [(i64, Option<u32>); 4] = [
+        (END, err(SaleError::ClaimStartInPast)),
+        (END + 1, None),
+        (END + MAX_CLAIM_START_DELAY, None),
+        (
+            END + MAX_CLAIM_START_DELAY + 1,
+            err(SaleError::ClaimStartTooFar),
+        ),
+    ];
+    for (claim_start_date, want) in cases {
+        assert_eq!(
+            code(SaleState::validate_claim_start(END, END, claim_start_date)),
+            want,
+            "claim_start_date = {claim_start_date}"
+        );
+    }
+}
+
+/// Once the sale has ended the anchor is `now`: a start behind `now` is rejected even
+/// though it is after the sale's end, and the ceiling moves with `now`.
+#[test]
+fn claim_start_date_anchor_follows_now_after_sale_end() {
+    let now = END + 10_000;
+    let cases: [(i64, Option<u32>); 6] = [
+        (END + 1, err(SaleError::ClaimStartInPast)),
+        (now, err(SaleError::ClaimStartInPast)),
+        (now + 1, None),
+        (END + MAX_CLAIM_START_DELAY + 1, None),
+        (now + MAX_CLAIM_START_DELAY, None),
+        (
+            now + MAX_CLAIM_START_DELAY + 1,
+            err(SaleError::ClaimStartTooFar),
+        ),
+    ];
+    for (claim_start_date, want) in cases {
+        assert_eq!(
+            code(SaleState::validate_claim_start(now, END, claim_start_date)),
+            want,
+            "claim_start_date = {claim_start_date}"
+        );
+    }
+}
+
+/// The i64 extremes: the ceiling addition returns an error rather than panics,
+/// whichever operand is the anchor.
+#[test]
+fn claim_start_date_extremes_are_errors() {
+    // The sale's end is the anchor and overflows on the ceiling addition.
     assert_eq!(
-        code(SaleState::validate_claim_start(i64::MAX - 1, i64::MAX)),
+        code(SaleState::validate_claim_start(NOW, i64::MAX - 1, i64::MAX)),
+        err(SaleError::MathOverflow)
+    );
+    // `now` is the anchor and overflows the same way.
+    assert_eq!(
+        code(SaleState::validate_claim_start(i64::MAX - 1, END, i64::MAX)),
         err(SaleError::MathOverflow)
     );
 }
