@@ -48,8 +48,9 @@ use vesting::events::WithdrawalAuthorityUpdated;
 use vesting_test_common::vesting_expected::vesting::{ECOSYSTEM_FULL_RELEASE_DAY, V2_REFERENCE};
 use vesting_test_common::{
     cancel_vesting_ix, close_vesting_ix, config_pda, custom_error_code, decode_event, err,
-    set_withdrawal_authority_ix, set_withdrawal_authority_ix_with_slots, vault_authority_pda,
-    vault_pda, vesting_pda, without_signer, ActivitySpec, TestEnv, DEFAULT_TGE_OFFSET,
+    event_authority_pda, foreign_program_pda, set_withdrawal_authority_ix,
+    set_withdrawal_authority_ix_with_slots, vault_authority_pda, vault_pda, vesting_pda,
+    without_signer, ActivitySpec, TestEnv, DEFAULT_TGE_OFFSET,
 };
 
 /// The activity's reference amount: the V2 bucket of §10.5 in token units.
@@ -534,6 +535,63 @@ fn set_withdrawal_authority_rejects_vault_authority_as_target() {
         &admin,
     )
     .expect("an ordinary wallet in the withdrawal target slot passes");
+    assert_eq!(
+        env.vesting_config().withdrawal_authority,
+        fresh,
+        "the withdrawal target changed only to a permitted address"
+    );
+}
+
+#[test]
+fn set_withdrawal_authority_rejects_off_curve_target() {
+    let mut env = TestEnv::new();
+    let admin = env.actors.admin.insecure_clone();
+    let before = env.init_default(DEFAULT_TGE_OFFSET);
+
+    // A data-less program-derived address passes the slot's type and is stopped by
+    // the body's curve check. Were it to pass, the remainder and the rent of every
+    // cancelled or closed activity would go to an address no key can sign for.
+    let free_id = env.next_activity_id();
+    let substitutions: [(&str, Pubkey); 4] = [
+        (
+            "a foreign program's PDA",
+            foreign_program_pda(b"multisig-vault"),
+        ),
+        (
+            "this program's future activity record",
+            vesting_pda(free_id),
+        ),
+        ("this program's future activity vault", vault_pda(free_id)),
+        ("the event authority", event_authority_pda()),
+    ];
+    for (case, target) in substitutions {
+        assert!(
+            !target.is_on_curve(),
+            "{case}: the fixture must be off-curve - otherwise the case checks the wrong thing"
+        );
+        env.expire_blockhash();
+        let r = send(
+            &mut env,
+            set_withdrawal_authority_ix(admin.pubkey(), target),
+            &admin,
+        );
+        assert_eq!(
+            custom_error_code(&r),
+            Some(err(VestingError::PayeeNotOnCurve)),
+            "{case} in the withdrawal_authority slot → PayeeNotOnCurve: {r:?}"
+        );
+        assert_target_unchanged(&env, before.withdrawal_authority, case);
+    }
+
+    // A POSITIVE in the same config: an ordinary wallet passes.
+    env.expire_blockhash();
+    let fresh = env.actors.beneficiary.pubkey();
+    send(
+        &mut env,
+        set_withdrawal_authority_ix(admin.pubkey(), fresh),
+        &admin,
+    )
+    .expect("an on-curve wallet in the withdrawal target slot passes");
     assert_eq!(
         env.vesting_config().withdrawal_authority,
         fresh,

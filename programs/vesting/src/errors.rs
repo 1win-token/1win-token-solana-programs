@@ -48,4 +48,6 @@ pub enum VestingError {
     NoPendingOwner,
     #[msg("Signer is not the Admin of the vesting config")]
     NotAdmin,
+    #[msg("Recipient or withdrawal address is off-curve; only a wallet with its own private key can receive a payout")]
+    PayeeNotOnCurve,
 }

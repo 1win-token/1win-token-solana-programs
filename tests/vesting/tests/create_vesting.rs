@@ -10,9 +10,10 @@
 //!    field of the valid set ([`ActivitySpec::valid`] / the canonical slots) and leaves
 //!    everything else passable - otherwise the failure could not be attributed to the
 //!    guard under test.
-//! 2. The order of the checks in the body is observable (Arch §9.5): the TGE gate → a
-//!    zero recipient → `reference_amount > 0` → the `label` length → the schedule
-//!    (`InvalidBps` → the share coupling → the `cliff + M` ceiling). A schedule
+//! 2. The order of the checks in the body is observable (Arch §9.5): the TGE gate → the
+//!    recipient (zero, `vault_authority`, off-curve) → `reference_amount > 0` → the
+//!    `label` length → the schedule (`InvalidBps` → the share coupling → the
+//!    `cliff + M` ceiling). A schedule
 //!    negative must supply a valid amount and label, or it would fail earlier and
 //!    verify the wrong invariant.
 //! 3. Both `init`s are declared BEFORE the `recipient` slot and resolve ahead of it,
@@ -39,7 +40,7 @@
 //! - The full 10×5 role matrix and the 10×3 TGE matrix; here five
 //!   wrong actors and the `now == tge_ts` point are covered for one instruction.
 //! - Substituting the derived `vesting` / `vault` slots away from the current counter,
-//! and the `#[event_cpi]` service slots - the substitution matrix. What is
+//!   and the `#[event_cpi]` service slots - the substitution matrix. What is
 //!   substituted here is `config`, `token_mint`, `recipient` and
 //!   `vault_authority`: the first two carry a binding, the third is the only slot whose
 //!   type is itself the validation, and the fourth holds the "recipient !=
@@ -69,7 +70,8 @@ use vesting_test_common::vesting_expected::vesting::{
 };
 use vesting_test_common::{
     config_pda, create_vesting_ix, create_vesting_ix_with_slots, custom_error_code, decode_event,
-    err, vault_authority_pda, vault_pda, vesting_pda, ActivitySpec, TestEnv, DEFAULT_TGE_OFFSET,
+    err, event_authority_pda, foreign_program_pda, vault_authority_pda, vault_pda, vesting_pda,
+    ActivitySpec, TestEnv, DEFAULT_TGE_OFFSET,
 };
 
 /// The label length ceiling in BYTES (Arch §9.5). A literal in the test:
@@ -839,28 +841,54 @@ fn create_vesting_rejects_non_system_recipient() {
 }
 
 #[test]
-fn create_vesting_accepts_off_curve_recipient_by_design() {
-    // There is NO `is_on_curve` check and none is being introduced: an off-curve
-    // address (a data-less PDA) belongs to the System Program, so the slot's type lets it
-    // through. The case pins that as deliberate behaviour rather than an oversight: the
-    // class "a recipient with no private key" is closed by the operational procedure
-    // rather than by an on-chain check. The appearance of such a check must turn red
-    // here.
+fn create_vesting_rejects_off_curve_recipient() {
     let mut env = TestEnv::new();
     env.init_default(DEFAULT_TGE_OFFSET);
-
-    let off_curve = Pubkey::find_program_address(&[b"off-curve probe"], &vesting::id()).0;
-    assert!(
-        !off_curve.is_on_curve(),
-        "the fixture address must be off-curve - otherwise the case checks the wrong thing"
-    );
-
     let spec = ActivitySpec::valid(V2_REFERENCE);
-    create(&mut env, off_curve, &spec).expect("an off-curve recipient is accepted");
+
+    // A data-less program-derived address belongs to the System Program, so the slot's
+    // type lets it through; the body's curve check is what rejects it. Were any of these
+    // to pass, claim would create a token account for an address no key can sign for
+    // and the payout would be lost there - whichever program the address is derived
+    // under. The activity PDAs are taken one id ahead: at the current id both `init`s
+    // resolve before the `recipient` slot, and the type would answer first.
+    let next_id = env.next_activity_id();
+    let future_id = next_id + 1;
+    let substitutions: [(&str, Pubkey); 4] = [
+        (
+            "a foreign program's PDA",
+            foreign_program_pda(b"multisig-vault"),
+        ),
+        (
+            "this program's future activity record",
+            vesting_pda(future_id),
+        ),
+        ("this program's future activity vault", vault_pda(future_id)),
+        ("the event authority", event_authority_pda()),
+    ];
+    for (case, recipient) in substitutions {
+        assert!(
+            !recipient.is_on_curve(),
+            "{case}: the fixture must be off-curve - otherwise the case checks the wrong thing"
+        );
+        env.expire_blockhash();
+        let r = create(&mut env, recipient, &spec);
+        assert_eq!(
+            custom_error_code(&r),
+            Some(err(VestingError::PayeeNotOnCurve)),
+            "{case} in the recipient slot → PayeeNotOnCurve: {r:?}"
+        );
+        assert_activity_not_created(&env, next_id, next_id, case);
+    }
+
+    // A POSITIVE in the same config: an ordinary wallet passes.
+    env.expire_blockhash();
+    let recipient = env.actors.recipients[0].pubkey();
+    create(&mut env, recipient, &spec).expect("an on-curve wallet in the recipient slot passes");
     assert_eq!(
-        env.vesting(0).recipient,
-        off_curve,
-        "the address was written as is - the residual risk is accepted and documented"
+        env.vesting(next_id).recipient,
+        recipient,
+        "the activity was created only with a permitted recipient"
     );
 }
 
@@ -871,10 +899,11 @@ fn create_vesting_rejects_vault_authority_as_recipient() {
     let spec = ActivitySpec::valid(V2_REFERENCE);
 
     // `vault_authority` is a data-less PDA (owner = the System Program), so the
-    // `SystemAccount` type lets it through (the same class as off-curve above) and the
-    // body's gate rejects it. Were the substitution to pass, claim would pay out to
-    // `vault_authority`'s own ATA - that is, back into the program's custody, from which
-    // nothing can withdraw the funds.
+    // `SystemAccount` type lets it through, and the body's named gate rejects it ahead
+    // of the curve check: the vaults' owner is off-curve too, but it keeps its own
+    // code. Were the substitution to pass, claim would pay out to `vault_authority`'s
+    // own ATA - that is, back into the program's custody, from which nothing can
+    // withdraw the funds.
     let r = create(&mut env, vault_authority_pda(), &spec);
     assert_eq!(
         custom_error_code(&r),

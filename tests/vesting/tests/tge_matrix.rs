@@ -47,7 +47,7 @@
 //! ===== DELIBERATELY DEFERRED =====
 //! - The role matrix of the same instructions - `role_matrix.rs`.
 //! - The boundaries of `set_tge`'s argument (`now`, `now + MAX_TGE_DELAY`, a
-//! one-second step) (`config_setters.rs`): what is checked here is the
+//!   one-second step) (`config_setters.rs`): what is checked here is the
 //!   moment of the call, not the value.
 //! - Slot substitutions.
 

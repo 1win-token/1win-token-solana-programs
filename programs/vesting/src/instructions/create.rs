@@ -45,6 +45,8 @@ pub struct CreateVesting<'info> {
     )]
     pub vault: Box<Account<'info, TokenAccount>>,
 
+    /// The bucket's payout wallet. The type keeps program-owned accounts out;
+    /// `validate_payee` in the body requires an on-curve address on top of it.
     pub recipient: SystemAccount<'info>,
 
     /// CHECK: the PDA that owns the vaults, no data; the address comes from the

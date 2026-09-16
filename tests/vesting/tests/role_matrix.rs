@@ -42,7 +42,7 @@
 //!    no right to claim" (G-1) is verified right here and nowhere else.
 //! 5. `assert_funded` has no signer at all (Arch §9.9): the actor acts as the fee
 //!    payer, and all six cells of the row are positives. It has no role negative by
-//! construction; a funding rejection lives in `funding.rs`.
+//!    construction; a funding rejection lives in `funding.rs`.
 //! 6. Every negative asserts the observable state is unchanged. The class "the
 //!    rejection left no created ATA" is exercised on the SECOND activity, whose
 //!    recipient still has no account: `init_if_needed` in `claim` runs in

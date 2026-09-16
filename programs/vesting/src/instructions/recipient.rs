@@ -26,6 +26,8 @@ pub struct SetRecipient<'info> {
     )]
     pub vesting: Account<'info, Vesting>,
 
+    /// The new payout wallet: the same type and the same `validate_payee` gates
+    /// as in `create_vesting`, so both write paths admit one class of address.
     pub new_recipient: SystemAccount<'info>,
 
     /// CHECK: the PDA that owns the vaults, no data; the address comes from the

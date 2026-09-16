@@ -40,7 +40,7 @@
 //!   only where there is a CPI - a transfer out of an activity vault (V2-V3). Here
 //!   only the cache's equality to the canonical bump is asserted.
 //! - The role and TGE matrices in full; the `initialize` CU
-//! benchmark.
+//!   benchmark.
 
 use anchor_lang::error::ErrorCode;
 use litesvm::types::TransactionResult;
@@ -55,8 +55,9 @@ use vesting::state::MAX_TGE_DELAY;
 use vesting_test_common::vesting_expected::vesting::{ECOSYSTEM_FULL_RELEASE_DAY, V2_REFERENCE};
 use vesting_test_common::{
     cancel_vesting_ix, close_vesting_ix, config_pda, custom_error_code, decode_event, err,
-    initialize_ix, initialize_ix_with_slots, vault_authority_pda, vault_pda, vesting_pda,
-    ActivitySpec, InitParams, TestEnv, ACTOR_LAMPORTS, DEFAULT_TGE_OFFSET, WIN_DECIMALS,
+    event_authority_pda, foreign_program_pda, initialize_ix, initialize_ix_with_slots,
+    vault_authority_pda, vault_pda, vesting_pda, ActivitySpec, InitParams, TestEnv, ACTOR_LAMPORTS,
+    DEFAULT_TGE_OFFSET, WIN_DECIMALS,
 };
 
 /// The reference amount of the activities used to verify that the single withdrawal
@@ -600,11 +601,12 @@ fn initialize_accepts_tge_exactly_at_max_delay() {
 // D.5 [#3] - NEGATIVE: withdrawal_authority
 //
 // The single withdrawal recipient W is fixed at `initialize` (fix #3) by a
-// `SystemAccount` slot: the type is itself the check, while `!= vault_authority` is
-// held by the body's gate (→ InvalidAuthority). Without them `CloseActivity` could
-// not structurally verify the addressees of the remainder and the rent. Both
-// negatives edit exactly one slot of the valid set, as the role negatives do,
-// and the positive in the same environment pins that W was written into the config.
+// `SystemAccount` slot: the type is itself the check, while `!= vault_authority`
+// (→ InvalidAuthority) and the curve membership (→ PayeeNotOnCurve) are held by the
+// body's gates. Without them `CloseActivity` could not structurally verify the
+// addressees of the remainder and the rent. The negatives edit exactly one slot of
+// the valid set, as the role negatives do, and the positive in the same environment
+// pins that W was written into the config.
 //
 // The first negative covers the "the slot holds a non-system-owned account" class
 // through two substitutions (following the pattern) and proves the recorded W
@@ -767,4 +769,46 @@ fn initialize_rejects_withdrawal_authority_equal_to_vault_authority() {
         env.actors.rent_collector.pubkey(),
         "a W ≠ vault_authority was written into the config"
     );
+}
+
+#[test]
+fn initialize_rejects_off_curve_withdrawal_authority() {
+    let mut env = TestEnv::new();
+    let authority = env.actors.owner.insecure_clone();
+
+    // A data-less program-derived address passes the slot's type (the owner of a
+    // non-existent account is the System Program) and is stopped by the body's curve
+    // check: no key can sign for such an address, so the remainder and the rent of every
+    // cancelled or closed activity would be lost at it.
+    let substitutions: [(&str, Pubkey); 4] = [
+        (
+            "a foreign program's PDA",
+            foreign_program_pda(b"multisig-vault"),
+        ),
+        ("this program's future activity record", vesting_pda(0)),
+        ("this program's future activity vault", vault_pda(0)),
+        ("the event authority", event_authority_pda()),
+    ];
+    for (case, slot) in substitutions {
+        assert!(
+            !slot.is_on_curve(),
+            "{case}: the fixture must be off-curve - otherwise the case checks the wrong thing"
+        );
+        env.expire_blockhash();
+        let mut p = env.valid_init_params(DEFAULT_TGE_OFFSET);
+        p.withdrawal_authority = slot;
+        let r = send_initialize(&mut env, &authority, &p);
+        assert_eq!(
+            custom_error_code(&r),
+            Some(err(VestingError::PayeeNotOnCurve)),
+            "{case} in the withdrawal_authority slot → PayeeNotOnCurve: {r:?}"
+        );
+        assert!(
+            !env.vesting_config_exists(),
+            "{case}: the singleton was not created"
+        );
+    }
+
+    // POSITIVE: the valid set passes in the same environment.
+    assert_valid_initialize_succeeds(&mut env, &authority);
 }

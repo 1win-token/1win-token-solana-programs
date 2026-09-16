@@ -38,9 +38,9 @@
 //!   here three instructions are swept.
 //! - `MathOverflow` at the `now + MAX_TGE_DELAY` ceiling in `set_tge`: it requires
 //!   `now` within 365 days of `i64::MAX` and is reachable only by forging the Clock
-//! directly - the substitution matrix.
+//!   directly - the substitution matrix.
 //! - Substituting the `event_authority` / `program` service slots of the
-//! `#[event_cpi]` context.
+//!   `#[event_cpi]` context.
 //! - A multisig as the real Owner signer: the tests use a single key, as does the Sale
 //!   suite.
 

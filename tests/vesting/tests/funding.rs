@@ -21,7 +21,7 @@
 //!    state is thus obtained without running the whole chain of claims. Without a
 //!    non-zero `claimed` the absolute form `vault.amount >= reference_amount` would
 //!    pass every test in the file and a swap of the formula would go unnoticed; the
-//! check after REAL claims lives elsewhere.
+//!    check after REAL claims lives elsewhere.
 //! 4. "Permissionless" is verified positively and across several keys: there is no
 //!    `Signer` slot in the context at all, so the only signer of the transaction is
 //!    its fee payer, and that same fee payer proves no role is asked for. The
@@ -62,7 +62,7 @@
 //! ===== DELIBERATELY DEFERRED =====
 //! - Slot substitutions: a foreign `token_mint`, a decoy `VestingConfig`,
 //!   another activity's vault, substituting `vault_authority` - the substitution
-//! matrix. The `AssertFunded` context's attributes are the same as
+//!   matrix. The `AssertFunded` context's attributes are the same as
 //!   `CloseActivity`'s and `Claim`'s and are covered there.
 //! - The 10×5 role matrix: this instruction has no role by construction.
 

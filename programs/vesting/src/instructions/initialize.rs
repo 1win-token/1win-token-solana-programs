@@ -31,6 +31,8 @@ pub struct Initialize<'info> {
     )]
     pub config: Box<Account<'info, VestingConfig>>,
 
+    /// The project's withdrawal target. The type keeps program-owned accounts
+    /// out; `validate_payee` in the body requires an on-curve address on top.
     pub withdrawal_authority: SystemAccount<'info>,
 
     /// CHECK: the PDA that owns the vaults, no data; declared for the sake of the

@@ -783,9 +783,9 @@ after a close).
 | `set_tge` | Admin | `now < config.tge_ts` | Changes the shared `tge_ts`; validation; a `TgeUpdated` event |
 | `set_admin` | Owner | `admin ≠ Pubkey::default()`, `admin ≠ config.owner`, `admin ≠ config.operator` | Changes `admin` (in one step); an `AdminUpdated` event |
 | `set_operator` | Owner | `operator ≠ Pubkey::default()`, `operator ≠ config.owner`, `operator ≠ config.admin` | Changes `operator` (in one step); an `OperatorUpdated` event |
-| `set_withdrawal_authority` | Admin | `withdrawal_authority ≠ vault_authority` | Changes the project's single withdrawal account (in one step, at any time); the new target is supplied as an account; a `WithdrawalAuthorityUpdated` event |
-| `create_vesting` | Owner | `now < config.tge_ts` | Creates a `Vesting` + its storage (`activity_id`); the arguments are `reference_amount`, `tge_bps`, `monthly_bps`, `cliff_months`, `label`; the recipient is supplied as an account; validation |
-| `set_recipient` | Admin | `new_recipient ≠ vault_authority` (there is no time condition - at any point in the activity's life) | Changes the activity's `recipient`; the new recipient is supplied as an account; a `RecipientUpdated` event |
+| `set_withdrawal_authority` | Admin | `withdrawal_authority ≠ vault_authority`, on the curve | Changes the project's single withdrawal account (in one step, at any time); the new target is supplied as an account; a `WithdrawalAuthorityUpdated` event |
+| `create_vesting` | Owner | `now < config.tge_ts` | Creates a `Vesting` + its storage (`activity_id`); the arguments are `reference_amount`, `tge_bps`, `monthly_bps`, `cliff_months`, `label`; the recipient is supplied as an account (on the curve); validation |
+| `set_recipient` | Admin | `new_recipient ≠ vault_authority`, on the curve (there is no time condition - at any point in the activity's life) | Changes the activity's `recipient`; the new recipient is supplied as an account; a `RecipientUpdated` event |
 | `cancel_vesting` | Owner | `now < config.tge_ts`, `claimed == 0` | Cancels an activity created in error; the storage remainder → the project's `beneficiary_token`, the rent → the project's `rent_collector`, the accounts are closed |
 | `claim` | the recipient or `operator` | `tge_ts > 0`, `now ≥ tge_ts`, `claimable > 0`, `vault.amount ≥ claimable` | Pays `claimable` out to the recipient's ATA, `claimed += claimable` |
 | `close_vesting` | Owner | `claimed ≥ reference_amount` | Closes a fully drawn activity; the storage remainder → the project's `beneficiary_token`, the rent → the project's `rent_collector`, the accounts are closed |
@@ -827,7 +827,9 @@ only from assigning different keys.
   `Pubkey::default()`, otherwise `InvalidAuthority`. The program does not restrict the
   roles from coinciding with one another: a single key may hold any two of them or all
   three, as in Sale and Burn; separating the roles is an organizational decision of
-  whoever owns the keys.
+  whoever owns the keys. A role key is not required to lie on the curve either:
+  Owner and Admin are multisigs, which sign through their program - the curve
+  requirement applies to the two payout addresses only (below).
 - **`initialize` / `set_withdrawal_authority` (the withdrawal target):**
   `withdrawal_authority` is supplied as an account of type `SystemAccount`, not as a
   `Pubkey` argument - the type *is* the check, the same construction as the recipient
@@ -844,11 +846,20 @@ only from assigning different keys.
   accounts) would then admit any other activity's storage - every storage belongs to
   `vault_authority` - i.e. one activity's remainder would be withdrawn into another's
   storage. The gate is therefore also part of the isolation of activity funds. The
+  type alone does not prove that a key stands behind the address: an address with no
+  account behind it - a program-derived address of any program, this program's own
+  future activity PDAs included - is attributed to the System Program and passes it.
+  So the address must also lie on the Ed25519 curve (otherwise `PayeeNotOnCurve`): a
+  program-derived address is off-curve by construction and no private key can ever
+  sign for it, so the remainder and the rent sent to it would be lost. This is the
+  requirement Sale puts on a buyer (`WalletNotOnCurve`), for the same reason -
+  neither a signature check (a program wallet signs through its program) nor the
+  owner check tells a program wallet from an ordinary one. The
   `withdrawal_authority ≠ Pubkey::default()` check (otherwise `InvalidAuthority`) stays
   in the body as insurance against a change of the slot's type: through the public
   interface it is unreachable - the zero address coincides with the System Program's
-  address, and the slot's type rejects it earlier. Both checks apply identically on
-  the two write paths: `initialize` and `set_withdrawal_authority` (Admin, one step,
+  address, and the slot's type rejects it earlier. All three checks apply identically
+  on the two write paths: `initialize` and `set_withdrawal_authority` (Admin, one step,
   no time condition - every cancel and every close reads the field's current value).
 - **`initialize` / `set_tge` (the shared TGE):** `tge_ts > now` (otherwise
   `InvalidTge`) and `tge_ts ≤ now + MAX_TGE_DELAY` - the ceiling cuts off an obviously
@@ -884,12 +895,19 @@ only from assigning different keys.
   instructions require `recipient ≠ vault_authority`, otherwise `InvalidAuthority`:
   `vault_authority` is gated explicitly because it is the signing PDA that custodies
   the storages - a recipient at that address would mean paying out into an ATA under
-  the program's custody, from which no instruction withdraws it. The program's other
-  uncreated PDAs - the internal `__event_authority` and the addresses of future
-  activities (`["vault", N]`, `["vesting", N]`, created together with activity `N`) -
-  and any other erroneous addresses are covered by an operational check of the recipients:
-  a registry of known project addresses plus a check that the address is not in the
-  program's PDA space. The `recipient ≠ Pubkey::default()` check (otherwise
+  the program's custody, from which no instruction withdraws it. Every other uncreated
+  program-derived address - the internal `__event_authority`, the addresses of future
+  activities (`["vault", N]`, `["vesting", N]`, created together with activity `N`), a
+  multisig vault, any PDA of a foreign program - is cut off by the curve check: both
+  instructions require the recipient to lie on the Ed25519 curve, otherwise
+  `PayeeNotOnCurve`. A program-derived address is off-curve by construction and no
+  private key can ever sign for it, so a claim to it would create a token account
+  nobody can move funds out of; a signature check would not tell such an address
+  apart (a program wallet signs through its program), and the owner check does not
+  either. What the curve does not prove is that a key exists behind an ordinary
+  address: a mistyped recipient is caught only operationally - by checking the
+  recipients against the registry of known project addresses and proving control
+  over each of them before TGE. The `recipient ≠ Pubkey::default()` check (otherwise
   `InvalidAuthority`) stays in the body as insurance against a change of the slot's
   type.
 - **`create_vesting` (the schedule):** `token_mint` is bound structurally
@@ -1052,7 +1070,8 @@ claim(activity_id):
 
 - **The recipient binding is structural.** The recipient is supplied as an account of
   type `SystemAccount` pinned with `address = vesting.recipient` (the address is taken
-  from the stored field, not from the signer); the destination is its ATA, given by the
+  from the stored field, not from the signer, and lies on the curve by construction -
+  both write paths check it, so `claim` does not); the destination is its ATA, given by the
   constraints `associated_token::authority = recipient` and
   `associated_token::mint = token_mint`. The operator physically cannot substitute an
   account of their own: any other token account (even one with `mint = token_mint` but
@@ -1160,7 +1179,7 @@ handover is observable through three events: `OwnerProposed` (a candidate is nam
 has taken over). The bucket `label` lives only in the event and is not stored on-chain.
 
 The errors form a single `#[error_code] enum`; the order of the variants is fixed and
-defines the codes 6000-6020: `MathOverflow`, `NotOwner`, `NotUpgradeAuthority`
+defines the codes 6000-6021: `MathOverflow`, `NotOwner`, `NotUpgradeAuthority`
 (`initialize` not from the upgrade-authority holder), `NotAuthorized` (a claim from
 neither the recipient nor the operator), `InvalidAuthority` (a zero role or recipient
 address, a recipient equal to `vault_authority`, or a `withdrawal_authority` that is
@@ -1185,7 +1204,8 @@ storage balance, or an uncovered remainder of the obligation in `assert_funded`)
 (`rent_collector` ≠ `config.withdrawal_authority`), `NoPendingOwner` (code 6019:
 `accept_owner` or `cancel_owner_proposal` with an empty `pending_owner`), `NotAdmin`
 (code 6020: `set_tge`, `set_recipient` or `set_withdrawal_authority` not from
-`config.admin`).
+`config.admin`), `PayeeNotOnCurve` (code 6021: an off-curve recipient or withdrawal
+target - a program-derived address - on any of the four write paths that set one).
 
 Three variants serve more than one invariant - the merging is deliberate. The order of
 the codes is frozen: splitting one in place would shift the codes of errors that have

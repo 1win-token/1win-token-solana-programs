@@ -34,7 +34,7 @@
 //! - The full role and TGE matrices.
 //! - Substituting the `#[event_cpi]` service slots - the substitution matrix.
 //! - Changing the recipient BEFORE TGE followed by a claim (the addressee of the very
-//! first payout) (`claim.rs`): here the change stands AFTER TGE and after a
+//!   first payout) (`claim.rs`): here the change stands AFTER TGE and after a
 //!   partial payout.
 
 use anchor_lang::error::ErrorCode;
@@ -51,8 +51,9 @@ use vesting_test_common::vesting_expected::vesting::{
 };
 use vesting_test_common::{
     cancel_vesting_ix, close_vesting_ix, config_pda, custom_error_code, decode_event, err,
-    recipient_ata, set_recipient_ix, set_recipient_ix_with_slots, vault_authority_pda, vesting_pda,
-    without_signer, ActivitySpec, TestEnv, DEFAULT_TGE_OFFSET,
+    event_authority_pda, foreign_program_pda, recipient_ata, set_recipient_ix,
+    set_recipient_ix_with_slots, vault_authority_pda, vault_pda, vesting_pda, without_signer,
+    ActivitySpec, TestEnv, DEFAULT_TGE_OFFSET,
 };
 
 /// The day of the first claim in the architecture's example V5: the recipient does not
@@ -258,6 +259,62 @@ fn set_recipient_rejects_vault_authority_as_new_recipient() {
         &admin,
     )
     .expect("an ordinary wallet in the new_recipient slot passes");
+    assert_eq!(
+        env.vesting(0).recipient,
+        new_recipient,
+        "the recipient changed only to a permitted address"
+    );
+}
+
+#[test]
+fn set_recipient_rejects_off_curve_new_recipient() {
+    let (mut env, old_recipient) = env_with_activity();
+    let admin = env.actors.admin.insecure_clone();
+
+    // The same class on the second write path: a data-less program-derived address
+    // passes the slot's type and is stopped by the body's curve check. Letting it
+    // through here would bypass the gate `create_vesting` holds.
+    let free_id = env.next_activity_id();
+    let substitutions: [(&str, Pubkey); 4] = [
+        (
+            "a foreign program's PDA",
+            foreign_program_pda(b"multisig-vault"),
+        ),
+        (
+            "this program's future activity record",
+            vesting_pda(free_id),
+        ),
+        ("this program's future activity vault", vault_pda(free_id)),
+        ("the event authority", event_authority_pda()),
+    ];
+    for (case, new_recipient) in substitutions {
+        assert!(
+            !new_recipient.is_on_curve(),
+            "{case}: the fixture must be off-curve - otherwise the case checks the wrong thing"
+        );
+        env.expire_blockhash();
+        let r = send(
+            &mut env,
+            set_recipient_ix(admin.pubkey(), 0, new_recipient),
+            &admin,
+        );
+        assert_eq!(
+            custom_error_code(&r),
+            Some(err(VestingError::PayeeNotOnCurve)),
+            "{case} in the new_recipient slot → PayeeNotOnCurve: {r:?}"
+        );
+        assert_recipient_unchanged(&env, old_recipient, case);
+    }
+
+    // A POSITIVE on the same activity: an ordinary wallet passes.
+    env.expire_blockhash();
+    let new_recipient = env.actors.recipients[1].pubkey();
+    send(
+        &mut env,
+        set_recipient_ix(admin.pubkey(), 0, new_recipient),
+        &admin,
+    )
+    .expect("an on-curve wallet in the new_recipient slot passes");
     assert_eq!(
         env.vesting(0).recipient,
         new_recipient,

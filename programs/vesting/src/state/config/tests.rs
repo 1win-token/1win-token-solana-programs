@@ -1,5 +1,5 @@
 //! Unit tests for the `VestingConfig` value checks: the TGE window boundaries, a
-//! zero role key, any two of the three roles colliding, and the payout address.
+//! zero role key, and the payout address (zero, the vault authority, off-curve).
 //! Each case expects a specific error code, not merely the fact of a rejection.
 
 use super::*;
@@ -90,15 +90,32 @@ fn role_key_rejects_zero() {
 
 // ----- Payout address -----
 
-/// The zero address and the vault authority's address are rejected; an ordinary
-/// one passes.
+/// A program-derived address under this program: off-curve by construction.
+fn pda(seed: &[u8]) -> Pubkey {
+    Pubkey::find_program_address(&[seed], &crate::ID).0
+}
+
+/// The zero address, the vault authority's address and an off-curve address are
+/// rejected, each with its own code; an ordinary on-curve one passes.
 #[test]
-fn payee_rejects_zero_and_vault_authority() {
+fn payee_rejects_zero_vault_authority_and_off_curve() {
+    let on_curve = key(1);
+    let off_curve = pda(b"probe");
+    assert!(
+        bytes_are_curve_point(on_curve),
+        "the fixture must be on-curve"
+    );
+    assert!(
+        !bytes_are_curve_point(off_curve),
+        "the fixture must be off-curve"
+    );
+
     let vault_authority = key(9);
-    let cases: [(Pubkey, Option<u32>); 3] = [
-        (key(1), None),
+    let cases: [(Pubkey, Option<u32>); 4] = [
+        (on_curve, None),
         (Pubkey::default(), err(VestingError::InvalidAuthority)),
         (vault_authority, err(VestingError::InvalidAuthority)),
+        (off_curve, err(VestingError::PayeeNotOnCurve)),
     ];
     for (payee, want) in cases {
         assert_eq!(
@@ -107,4 +124,19 @@ fn payee_rejects_zero_and_vault_authority() {
             "payee = {payee}"
         );
     }
+}
+
+/// The named `vault_authority` gate stands ahead of the curve check: the vaults'
+/// owner is a PDA and off-curve too, yet it keeps its own code.
+#[test]
+fn payee_vault_authority_gate_precedes_curve_check() {
+    let vault_authority = pda(b"vault_authority");
+    assert!(!bytes_are_curve_point(vault_authority));
+    assert_eq!(
+        code(VestingConfig::validate_payee(
+            vault_authority,
+            vault_authority
+        )),
+        err(VestingError::InvalidAuthority)
+    );
 }

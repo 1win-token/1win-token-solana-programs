@@ -26,7 +26,7 @@
 | **Admin** | The administration multisig | Every sale parameter, the phase schedule, activating Claim, the Burn parameters, the pause, per-wallet limits (Graylist), the token's Freeze Authority; in Vesting - the unlock start date (before it arrives), an activity's recipient address (at any point in its life) and the project address that receives the remainder and the rent when an activity is cancelled or closed |
 | **Operator** | The automation key | Automation: blocking (Blacklist), refunding risky deposits, closing exhausted records; executing the daily burn (§4); triggering a vesting claim (the tokens go to the recipient, §5) |
 | **User** | A sale participant | Deposits USDC, claims |
-| **Vesting recipient** | The project wallet of an emission bucket | Claims the unlocked $1WIN of its vesting activity |
+| **Vesting recipient** | The project wallet of an emission bucket - an ordinary wallet with a private key of its own (VE-19) | Claims the unlocked $1WIN of its vesting activity |
 
 ### 1.2 Governance
 
@@ -495,3 +495,12 @@ Treasury - 0% at TGE, a 9-month cliff (270 days), then 4% per month:
   it with a signature, and until then the nomination can be replaced or withdrawn.
   Admin and Operator are assigned by Owner in one step - a mistaken assignment is
   fixed by Owner itself, and those roles dispose of no funds.
+- **VE-19.** The two payout addresses - an activity's recipient and the project
+  address that receives the remainder and the rent - are ordinary wallets with a
+  private key of their own. Program wallets (a multisig vault, a custody service, a
+  smart wallet) are not supported as payout addresses: assigning such an address is
+  rejected by the program, on creation and on every later change alike. The roles
+  are not restricted this way - Owner and Admin are multisigs and sign through their
+  program. An ordinary address that is mistyped cannot be told apart by the program:
+  checking the recipients against the list of known project addresses and proving
+  control over each of them before the unlock starts stays an operational duty.

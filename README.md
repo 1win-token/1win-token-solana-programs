@@ -47,7 +47,10 @@ no pause and no revoke - once vested, funds are permanently claimable.
 
 Roles: **Owner** (multisig - config, activity lifecycle, role rotation), **Admin**
 (TGE date, activity recipient, withdrawal target), **Operator** (triggers `claim`
-on behalf of recipients), **Recipient** (claims its own activity).
+on behalf of recipients), **Recipient** (claims its own activity). The recipient
+and the withdrawal target are ordinary wallets - addresses on the Ed25519 curve
+with a private key of their own: a program-derived address (a multisig vault, a
+custody account) is rejected when assigned, while the roles may be program wallets.
 
 ### Burn (`programs/burn`)
 

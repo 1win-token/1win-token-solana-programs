@@ -36,12 +36,13 @@ pub use ix::{
     cancel_owner_proposal_ix, cancel_owner_proposal_ix_with_config, cancel_vesting_ix,
     cancel_vesting_ix_with_slots, claim_ix, claim_ix_with_slots, close_vesting_ix,
     close_vesting_ix_with_slots, config_pda, create_vesting_ix, create_vesting_ix_with_slots,
-    event_authority_pda, funding_tx_ixs, initialize_ix, initialize_ix_with_slots, mint_to_vault_ix,
-    non_canonical_pda, propose_owner_ix, propose_owner_ix_with_config, recipient_ata,
-    revoke_mint_authority_ix, set_admin_ix, set_admin_ix_with_config, set_operator_ix,
-    set_operator_ix_with_config, set_recipient_ix, set_recipient_ix_with_slots, set_tge_ix,
-    set_tge_ix_with_config, set_withdrawal_authority_ix, set_withdrawal_authority_ix_with_slots,
-    vault_authority_pda, vault_pda, vesting_pda, without_signer, ActivitySpec, InitParams,
+    event_authority_pda, foreign_program_pda, funding_tx_ixs, initialize_ix,
+    initialize_ix_with_slots, mint_to_vault_ix, non_canonical_pda, propose_owner_ix,
+    propose_owner_ix_with_config, recipient_ata, revoke_mint_authority_ix, set_admin_ix,
+    set_admin_ix_with_config, set_operator_ix, set_operator_ix_with_config, set_recipient_ix,
+    set_recipient_ix_with_slots, set_tge_ix, set_tge_ix_with_config, set_withdrawal_authority_ix,
+    set_withdrawal_authority_ix_with_slots, vault_authority_pda, vault_pda, vesting_pda,
+    without_signer, ActivitySpec, InitParams,
 };
 pub use scenario::{at_period, DEFAULT_TGE_OFFSET};
 pub use token::TOKEN_2022_ID;

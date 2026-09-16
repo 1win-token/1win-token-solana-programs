@@ -278,7 +278,7 @@ fn identical_tx_replay_rejected_until_blockhash_expires() {
 /// decision (an indexer migration, a redeploy).
 #[test]
 fn error_codes_are_frozen() {
-    let frozen: [(VestingError, u32); 21] = [
+    let frozen: [(VestingError, u32); 22] = [
         (VestingError::MathOverflow, 6000),
         (VestingError::NotOwner, 6001),
         (VestingError::NotUpgradeAuthority, 6002),
@@ -300,6 +300,7 @@ fn error_codes_are_frozen() {
         (VestingError::InvalidRentCollector, 6018),
         (VestingError::NoPendingOwner, 6019),
         (VestingError::NotAdmin, 6020),
+        (VestingError::PayeeNotOnCurve, 6021),
     ];
 
     for (variant, code) in frozen {

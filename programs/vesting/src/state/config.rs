@@ -3,6 +3,7 @@
 //! admin and operator.
 
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::pubkey::bytes_are_curve_point;
 
 use crate::errors::VestingError;
 
@@ -50,15 +51,20 @@ impl VestingConfig {
     }
 
     /// An address the program pays out to: an activity recipient or a withdrawal
-    /// target. It must be non-zero and must differ from the vault authority -
-    /// under that address the funds would end up in the program's own custody.
-    /// The zero address is currently rejected earlier by the slot type
-    /// (`SystemAccount`); the check is kept in case that type changes. Called by
-    /// `initialize`, `create_vesting`, `set_recipient` and
-    /// `set_withdrawal_authority`.
+    /// target. It must be non-zero, must differ from the vault authority - under
+    /// that address the funds would end up in the program's own custody - and
+    /// must lie on the Ed25519 curve: the `SystemAccount` type of the slots lets
+    /// an address with no account behind it through, and a program-derived
+    /// address, off-curve by construction, has no private key that could ever
+    /// move a payout out of its token account. The roles are not held to the
+    /// curve - a multisig signs through its program. The zero address is
+    /// currently rejected earlier by the slot type (`SystemAccount`); the check
+    /// is kept in case that type changes. Called by `initialize`,
+    /// `create_vesting`, `set_recipient` and `set_withdrawal_authority`.
     pub fn validate_payee(payee: Pubkey, vault_authority: Pubkey) -> Result<()> {
         require_keys_neq!(payee, Pubkey::default(), VestingError::InvalidAuthority);
         require_keys_neq!(payee, vault_authority, VestingError::InvalidAuthority);
+        require!(bytes_are_curve_point(payee), VestingError::PayeeNotOnCurve);
         Ok(())
     }
 }

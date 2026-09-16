@@ -18,6 +18,8 @@ pub struct SetWithdrawalAuthority<'info> {
     )]
     pub config: Account<'info, VestingConfig>,
 
+    /// The new withdrawal target: the same type and the same `validate_payee`
+    /// gates as in `initialize`.
     pub withdrawal_authority: SystemAccount<'info>,
 
     /// CHECK: the PDA that owns the vaults, no data; the address comes from the

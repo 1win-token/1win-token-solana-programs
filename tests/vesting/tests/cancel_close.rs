@@ -73,7 +73,7 @@
 //!
 //! ===== DELIBERATELY DEFERRED =====
 //! - Substituting `vault_authority` and a foreign `token_mint` in the cancellation and
-//! close contexts - the substitution matrix.
+//!   close contexts - the substitution matrix.
 
 use anchor_lang::error::ErrorCode;
 use litesvm::types::TransactionResult;

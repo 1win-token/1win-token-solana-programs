@@ -85,6 +85,17 @@ pub fn event_authority_pda() -> Pubkey {
     Pubkey::find_program_address(&[b"__event_authority"], &vesting::id()).0
 }
 
+/// A program id nothing runs behind: the owner of [`foreign_program_pda`].
+const FOREIGN_PROGRAM_ID: Pubkey = Pubkey::new_from_array([0xF0; 32]);
+
+/// A PDA of a foreign program - the shape of a multisig vault or of any other
+/// program-controlled address. Off-curve by construction: no private key can sign
+/// for it, and the address has no account behind it, so the `SystemAccount` type
+/// alone lets it through.
+pub fn foreign_program_pda(seed: &[u8]) -> Pubkey {
+    Pubkey::find_program_address(&[seed], &FOREIGN_PROGRAM_ID).0
+}
+
 /// A recipient's ATA for the $1WIN mint - the payout addressee in `claim`
 /// (Arch §9.8). The mint is passed explicitly: it differs per environment
 /// (`TestEnv::win_mint`), and the negatives substitute a "foreign" one
