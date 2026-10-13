@@ -6,9 +6,9 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-sale = "FtWxXcxvwd8w2QyLZqvjBnfF5yNegqzwNnNyF6PgkZub"
-burn = "HuzMDQVv3TA4wWFW1m4pBQ4q5Sz7aHoPwLLGHEzpP8Cb"
-vesting = "9AxqkB7qfMxQrbUwfhkyBTuG4DDEVa8t5utEeSM7b1hQ"
+sale = "GWvQinGBRa7ZUzhXY23MrLjdsx3KfRGxH8yXURBwrz1R"
+burn = "B2RFzpckwjtHXHMrPMKarg6Cj6xkSdT6mru4gJiJE87L"
+vesting = "sxzuA7TuRvjVbrXkJUgrYq2hfjVf3RFd8WFaSxt2rYm"
 
 [provider]
 cluster = "localnet"

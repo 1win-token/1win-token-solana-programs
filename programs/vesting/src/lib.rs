@@ -14,7 +14,7 @@ pub mod math;
 
 use instructions::*;
 
-declare_id!("9AxqkB7qfMxQrbUwfhkyBTuG4DDEVa8t5utEeSM7b1hQ");
+declare_id!("sxzuA7TuRvjVbrXkJUgrYq2hfjVf3RFd8WFaSxt2rYm");
 
 #[program]
 pub mod vesting {

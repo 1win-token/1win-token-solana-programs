@@ -12,7 +12,7 @@ pub(crate) mod seeds;
 
 use instructions::*;
 
-declare_id!("HuzMDQVv3TA4wWFW1m4pBQ4q5Sz7aHoPwLLGHEzpP8Cb");
+declare_id!("B2RFzpckwjtHXHMrPMKarg6Cj6xkSdT6mru4gJiJE87L");
 
 #[program]
 pub mod burn {

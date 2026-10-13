@@ -14,7 +14,7 @@ pub(crate) mod vault;
 
 use instructions::*;
 
-declare_id!("FtWxXcxvwd8w2QyLZqvjBnfF5yNegqzwNnNyF6PgkZub");
+declare_id!("GWvQinGBRa7ZUzhXY23MrLjdsx3KfRGxH8yXURBwrz1R");
 
 #[program]
 pub mod sale {
